@@ -2,131 +2,266 @@
 <html lang="en">
 
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Intentsity — Simple UI</title>
-    <style>
-        body {
-            font-family: Arial, Helvetica, sans-serif;
-            margin: 1rem;
-        }
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Intentsity — Editor</title>
+  <style>
+    :root {
+      --gap: 12px;
+      --panel-bg: #fafafa;
+      --muted: #666;
+    }
 
-        textarea {
-            width: 100%;
-            height: 6rem;
-        }
+    body {
+      font-family: Inter, Arial, Helvetica, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
 
-        .intent {
-            border: 1px solid #ddd;
-            padding: .5rem;
-            margin-bottom: .5rem;
-        }
+    header {
+      padding: 12px;
+      background: #222;
+      color: white;
+    }
 
-        button {
-            margin-right: .5rem;
-        }
-    </style>
+    .container {
+      display: flex;
+      gap: var(--gap);
+      padding: 16px;
+    }
+
+    .left {
+      width: 360px;
+    }
+
+    .right {
+      flex: 1;
+      background: var(--panel-bg);
+      padding: 12px;
+      border-left: 1px solid #eee;
+    }
+
+    .controls {
+      margin-bottom: 12px;
+    }
+
+    input[type=text],
+    textarea,
+    select {
+      width: 100%;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+
+    .intent-row {
+      padding: 8px;
+      border: 1px solid #e5e5e5;
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .intent-row.active {
+      background: #eef6ff;
+      border-color: #bcdff8;
+    }
+
+    .small {
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+
+    .toolbar {
+      margin-top: 8px;
+    }
+
+    button {
+      padding: 8px 10px;
+      margin-right: 6px;
+    }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      background: #fff;
+      padding: 8px;
+      border: 1px solid #eee;
+    }
+  </style>
 </head>
 
 <body>
-    <h1>Intentsity — Minimal UI</h1>
+  <header>
+    <h2 style="margin:0">Intentsity — Intent Editor</h2>
+  </header>
 
-    <p>
-        Config Entry ID: <input id="entry_id" placeholder="enter config entry id" style="width:40%" />
-        <button id="btn_refresh">Refresh</button>
-    </p>
+  <div class="container">
+    <div class="left">
+      <div class="controls">
+        <label class="small">Config Entry ID</label>
+        <input id="entry_id" placeholder="config entry id" />
+        <div style="margin-top:8px">
+          <button id="btn_refresh">Refresh</button>
+          <button id="btn_new">New Intent</button>
+        </div>
+      </div>
 
-    <h2>Create Intent</h2>
-    <p>
-        Name: <input id="intent_name" />
-        Description: <input id="intent_description" style="width:50%" />
-    </p>
-    <p>
-        Full JSON payload (optional):
-        <textarea id="intent_payload">{"name":"","description":""}</textarea>
-    </p>
-    <p>
-        <button id="btn_create">Create Intent</button>
-    </p>
+      <div id="list" aria-live="polite">Loading…</div>
+    </div>
 
-    <h2>Stored Intents</h2>
-    <div id="intents_list">(no data)</div>
+    <div class="right">
+      <div id="editor">
+        <div id="editor_empty" class="small">Select an intent from the left or create a new one.</div>
+        <div id="editor_form" style="display:none">
+          <label class="small">ID</label>
+          <input id="f_id" readonly />
+          <label class="small">Name</label>
+          <input id="f_name" />
+          <label class="small">Description</label>
+          <input id="f_description" />
 
-    <script src="/api/intentsity/static/intentsity.js"></script>
-    <script>
-        const entryInput = document.getElementById('entry_id');
-        const listEl = document.getElementById('intents_list');
+          <label class="small">Slots / Lists / Expansions (JSON)</label>
+          <textarea id="f_json" rows="10">{}</textarea>
 
-        async function refresh() {
-            const entryId = entryInput.value.trim();
-            if (!entryId) {
-                listEl.innerText = 'Please provide an entry id above.';
-                return;
-            }
-            try {
-                const items = await window.intentsity.listIntents(entryId);
-                renderList(items || []);
-            } catch (err) {
-                listEl.innerText = 'Error: ' + (err && err.message ? err.message : String(err));
-            }
+          <div class="toolbar">
+            <button id="btn_save">Save</button>
+            <button id="btn_delete">Delete</button>
+            <button id="btn_clone">Clone</button>
+          </div>
+
+          <h4 class="small">Preview</h4>
+          <pre id="preview">(no preview)</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/api/intentsity/static/intentsity.js"></script>
+  <script>
+    // Basic single-file editor using the websocket helper
+    const entryInput = document.getElementById('entry_id');
+    const listEl = document.getElementById('list');
+    const btnRefresh = document.getElementById('btn_refresh');
+    const btnNew = document.getElementById('btn_new');
+    const editorForm = document.getElementById('editor_form');
+    const editorEmpty = document.getElementById('editor_empty');
+
+    let intents = [];
+    let current = null;
+
+    function showEditor(show) {
+      editorForm.style.display = show ? 'block' : 'none';
+      editorEmpty.style.display = show ? 'none' : 'block';
+    }
+
+    async function loadIntents() {
+      const entryId = entryInput.value.trim();
+      if (!entryId) { listEl.innerHTML = '<div class="small">Provide entry id above</div>'; return; }
+      listEl.innerHTML = 'Loading…';
+      try {
+        intents = await window.intentsity.listIntents(entryId) || [];
+        renderList();
+      } catch (err) {
+        listEl.innerHTML = '<div class="small">Error: ' + (err.message || err) + '</div>';
+      }
+    }
+
+    function renderList() {
+      if (!intents.length) { listEl.innerHTML = '<div class="small">(no intents)</div>'; return; }
+      listEl.innerHTML = '';
+      for (const it of intents) {
+        const row = document.createElement('div');
+        row.className = 'intent-row' + (current && current.id === it.id ? ' active' : '');
+        row.innerHTML = '<strong>' + (it.name || '(no name)') + '</strong><div class="small">' + (it.description || '') + '</div>';
+        row.onclick = () => openIntent(it.id);
+        listEl.appendChild(row);
+      }
+    }
+
+    function openIntent(id) {
+      current = intents.find((i) => i.id === id);
+      if (!current) return;
+      showEditor(true);
+      document.getElementById('f_id').value = current.id || '';
+      document.getElementById('f_name').value = current.name || '';
+      document.getElementById('f_description').value = current.description || '';
+      document.getElementById('f_json').value = JSON.stringify({
+        slots: current.slots || [],
+        lists: current.lists || [],
+        expansion_rules: current.expansion_rules || [],
+        utterances: current.utterances || []
+      }, null, 2);
+      updatePreview();
+      renderList();
+    }
+
+    function updatePreview() {
+      const raw = document.getElementById('f_json').value;
+      try {
+        const parsed = JSON.parse(raw);
+        document.getElementById('preview').textContent = JSON.stringify(parsed, null, 2);
+      } catch (err) {
+        document.getElementById('preview').textContent = 'Invalid JSON: ' + err.message;
+      }
+    }
+
+    btnRefresh.onclick = loadIntents;
+    btnNew.onclick = async () => {
+      showEditor(true);
+      current = { id: '', name: '', description: '', slots: [], lists: [], expansion_rules: [], utterances: [] };
+      document.getElementById('f_id').value = '';
+      document.getElementById('f_name').value = '';
+      document.getElementById('f_description').value = '';
+      document.getElementById('f_json').value = JSON.stringify({ slots: [], lists: [], expansion_rules: [], utterances: [] }, null, 2);
+      updatePreview();
+    };
+
+    document.getElementById('f_json').addEventListener('input', updatePreview);
+
+    document.getElementById('btn_save').onclick = async () => {
+      const entryId = entryInput.value.trim();
+      if (!entryId) { alert('Provide entry id'); return; }
+      const id = document.getElementById('f_id').value || undefined;
+      const name = document.getElementById('f_name').value.trim();
+      const desc = document.getElementById('f_description').value.trim();
+      let extras = {};
+      try { extras = JSON.parse(document.getElementById('f_json').value); } catch (err) { alert('Invalid JSON for slots/lists'); return; }
+
+      const payload = Object.assign({}, { name, description: desc }, extras);
+      try {
+        if (id) {
+          await window.intentsity.updateIntent(entryId, id, payload);
+        } else {
+          await window.intentsity.createIntent(entryId, payload);
         }
+        await loadIntents();
+        alert('Saved');
+      } catch (err) { alert('Error saving: ' + (err.message || err)); }
+    };
 
-        function renderList(items) {
-            if (!items.length) {
-                listEl.innerText = '(no intents)';
-                return;
-            }
-            listEl.innerHTML = '';
-            for (const it of items) {
-                const wrapper = document.createElement('div');
-                wrapper.className = 'intent';
-                const pre = document.createElement('pre');
-                pre.textContent = JSON.stringify(it, null, 2);
-                wrapper.appendChild(pre);
-                const del = document.createElement('button');
-                del.textContent = 'Delete';
-                del.onclick = async () => {
-                    if (!confirm('Delete intent ' + it.id + '?')) return;
-                    await window.intentsity.deleteIntent(entryInput.value.trim(), it.id);
-                    await refresh();
-                };
-                wrapper.appendChild(del);
-                listEl.appendChild(wrapper);
-            }
-        }
+    document.getElementById('btn_delete').onclick = async () => {
+      const entryId = entryInput.value.trim();
+      const id = document.getElementById('f_id').value;
+      if (!id) { alert('No intent selected'); return; }
+      if (!confirm('Delete intent ' + id + '?')) return;
+      try { await window.intentsity.deleteIntent(entryId, id); await loadIntents(); showEditor(false); alert('Deleted'); } catch (err) { alert('Error deleting: ' + (err.message || err)); }
+    };
 
-        document.getElementById('btn_refresh').onclick = refresh;
+    document.getElementById('btn_clone').onclick = async () => {
+      const entryId = entryInput.value.trim();
+      const name = document.getElementById('f_name').value + ' (copy)';
+      let extras = {};
+      try { extras = JSON.parse(document.getElementById('f_json').value); } catch (err) { alert('Invalid JSON'); return; }
+      const payload = Object.assign({}, { name, description: document.getElementById('f_description').value }, extras);
+      try { await window.intentsity.createIntent(entryId, payload); await loadIntents(); alert('Cloned'); } catch (err) { alert('Error cloning: ' + (err.message || err)); }
+    };
 
-        document.getElementById('btn_create').onclick = async () => {
-            const entryId = entryInput.value.trim();
-            if (!entryId) { alert('Provide entry id'); return; }
-            let payload;
-            try {
-                payload = JSON.parse(document.getElementById('intent_payload').value);
-            } catch (err) {
-                alert('Invalid JSON payload');
-                return;
-            }
-            // Fill name/description when present in form
-            const name = document.getElementById('intent_name').value.trim();
-            const desc = document.getElementById('intent_description').value.trim();
-            if (name) payload.name = name;
-            if (desc) payload.description = desc;
-            try {
-                await window.intentsity.createIntent(entryId, payload);
-                await refresh();
-            } catch (err) {
-                alert('Error creating intent: ' + (err && err.message ? err.message : String(err)));
-            }
-        };
-
-        // Auto-refresh if hass is available and an entry id is set in query
-        window.addEventListener('load', () => {
-            const params = new URLSearchParams(window.location.search);
-            if (params.has('entry_id')) entryInput.value = params.get('entry_id');
-            if (entryInput.value) refresh();
-        });
-    </script>
+    // Auto-populate entry id from query and auto-load intents
+    window.addEventListener('load', () => {
+      const params = new URLSearchParams(window.location.search);
+      if (params.has('entry_id')) entryInput.value = params.get('entry_id');
+      if (entryInput.value) loadIntents();
+    });
+  </script>
 </body>
 
 </html>
