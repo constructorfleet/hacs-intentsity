@@ -19,8 +19,12 @@ https://developers.home-assistant.io/docs/creating_integration_manifest
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import TYPE_CHECKING
+from pathlib import Path
+import traceback
+from typing import TYPE_CHECKING, Any, cast
 
+# Import StaticPathConfig from Home Assistant HTTP component
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME, Platform
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
@@ -28,9 +32,10 @@ from homeassistant.loader import async_get_loaded_integration
 
 from .api import IntentsityApiClient
 from .const import DOMAIN, LOGGER
-from .coordinator import IntentsityDataUpdateCoordinator
+from .coordinator import IntentsCoordinator, IntentsityDataUpdateCoordinator
 from .data import IntentsityData
 from .service_actions import async_setup_services
+from .websocket import async_register_websocket_commands
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -74,6 +79,29 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     https://developers.home-assistant.io/docs/dev_101_services
     """
     await async_setup_services(hass)
+    # Register websocket API commands (best-effort)
+    async_register_websocket_commands(hass)
+    # Serve minimal frontend static assets at /api/intentsity/static/
+    static_path = Path(__file__).parent / "frontend"
+    # Register static path using the async helper when available.
+    # Construct a StaticPathConfig and call async_register_static_paths.
+    try:
+        # Construct a configuration for static paths using the Home Assistant
+        # StaticPathConfig dataclass.
+        static_item: StaticPathConfig = StaticPathConfig(
+            url_path="/api/intentsity/static",
+            path=str(static_path),
+            cache_headers=False,
+        )
+        static_config = (static_item,)
+        # Use the async helper from hass.http. Do NOT fall back to the removed
+        # `register_static_path` API because it no longer exists.
+        try:
+            cast(Any, hass.http).async_register_static_paths(static_config)
+        except (RuntimeError, AttributeError) as err:  # pragma: no cover - log and continue
+            LOGGER.debug("Failed to async_register_static_paths: %s", err)
+    except (RuntimeError, AttributeError):  # pragma: no cover - best-effort only
+        LOGGER.debug("Could not construct/register static frontend path: %s", traceback.format_exc())
     return True
 
 
@@ -103,12 +131,14 @@ async def async_setup_entry(
     the integration's lifecycle for API communication.
 
     Args:
-        hass: The Home Assistant instance.
-        entry: The config entry being set up.
-
-    Returns:
-        True if setup was successful.
-
+        web_dir = os.path.join(os.path.dirname(__file__), "frontend")
+        # Register a static path for the minimal frontend.
+        # Wrap in try/except because some test runners mock hass.http differently.
+        hass.http.register_static_path(
+            "/api/intentsity/static",
+            web_dir,
+            cache_time=0,
+        )
     For more information:
     https://developers.home-assistant.io/docs/config_entries_index/#setting-up-an-entry
     """
@@ -136,6 +166,13 @@ async def async_setup_entry(
         coordinator=coordinator,
     )
 
+    # Create and load intents coordinator (persistent storage)
+    intents_coord = IntentsCoordinator(hass)
+    await intents_coord.async_load()
+    # Attach to runtime data and client for convenient access
+    entry.runtime_data.intents_coordinator = intents_coord
+    client.intents_coordinator = intents_coord
+
     # https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-single-api-poll-for-data-for-all-entities
     await coordinator.async_config_entry_first_refresh()
 
@@ -143,6 +180,9 @@ async def async_setup_entry(
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
 
     return True
+
+
+# Use the StaticPathConfig dataclass from Home Assistant for runtime registration
 
 
 async def async_unload_entry(
