@@ -45,6 +45,8 @@ If you're using GitHub Copilot, path-specific instructions in `.github/instructi
 
 ## Working With Developers
 
+Never ask for any further instructions or clarification on what to do next. Always proceed with the next logical step in implementation based on the current context and instructions.
+
 **For workflow basics (small changes, translations, tests, session management):** See `.github/copilot-instructions.md` for quick-reference guidance.
 
 ### When Instructions Conflict With Requests

@@ -30,23 +30,7 @@ Uncomment and customize these badges if you want to use them:
 - **Options Flow**: Adjust settings like update interval after setup
 - **Custom Services**: Advanced control with built-in service calls
 
-**This integration will set up the following platforms.**
 
-Platform | Description
--- | --
-`sensor` | Air quality index (AQI), PM2.5, filter life, and runtime
-`binary_sensor` | API connection status and filter replacement alert
-`switch` | Child lock and LED display controls
-`select` | Fan speed selection (Low/Medium/High/Auto)
-`number` | Target humidity setting (30-80%)
-`button` | Reset filter timer after replacement
-`fan` | Air purifier fan control with speed settings
-
-> **💡 Interactive Demo**: The entities are interconnected for demonstration:
->
-> - Press the **Reset Filter Timer** button → **Filter Life Remaining** sensor updates to 100%
-> - Change the **Air Purifier** fan speed → **Fan Speed** select syncs automatically
-> - Change the **Fan Speed** select → **Air Purifier** fan syncs automatically
 
 ## 🚀 Quick Start
 
@@ -127,59 +111,7 @@ The integration creates several entities for your air purifier:
 
 Find all entities in **Settings** → **Devices & Services** → **Intentsity** → click on the device.
 
-## Available Entities
 
-### Sensors
-
-- **Air Quality Index (AQI)**: Real-time air quality measurement (0-500 scale)
-  - Includes air quality category (Good/Moderate/Unhealthy/etc.)
-  - Health recommendations based on current AQI
-- **PM2.5**: Fine particulate matter concentration in µg/m³
-- **Filter Life Remaining** (Diagnostic): Shows remaining filter life as percentage
-- **Total Runtime** (Diagnostic): Total operating hours of the device
-
-### Binary Sensors
-
-- **API Connection**: Shows whether the connection to the API is active
-  - On: Connected and receiving data
-  - Off: Connection lost or authentication failed
-  - Shows update interval and API endpoint information
-- **Filter Replacement Needed**: Alerts when filter needs replacement
-  - Shows estimated days remaining
-  - Turns on when filter life is low
-
-### Switches
-
-- **Child Lock**: Prevents accidental button presses on the device
-  - Icon changes based on state (locked/unlocked)
-- **LED Display**: Enable/disable the LED display
-  - Disabled by default - enable in entity settings if needed
-
-### Select
-
-- **Fan Speed**: Choose from Low, Medium, High, or Auto
-  - Icon changes dynamically based on selected speed
-  - Auto mode adjusts speed based on air quality
-  - Syncs bidirectionally with the Air Purifier fan entity
-
-### Number
-
-- **Target Humidity**: Set desired humidity level (30-80%)
-  - Adjustable in 5% increments
-  - Displayed as a slider in the UI
-
-### Button
-
-- **Reset Filter Timer**: Reset the filter life to 100%
-  - Press to reset after replacing the filter
-  - Instantly updates the Filter Life Remaining sensor
-
-### Fan
-
-- **Air Purifier**: Control the air purifier fan speed and power
-  - Three speed levels: Low, Medium, High
-  - Syncs bidirectionally with the Fan Speed select entity
-  - Turn on/off functionality
 
 ## Custom Services
 
@@ -294,6 +226,56 @@ If your device is not responding:
 3. Verify the device is powered on
 4. Check the integration diagnostics (Settings → Devices & Services → Intentsity → 3 dots → Download diagnostics)
 
+
+## 🧠 Intent Management UI & API
+
+### Intent Editor Panel
+
+Intentsity now includes a full-featured **Intent Management Editor** accessible from the Home Assistant sidebar. This UI allows you to:
+
+- View all defined intents
+- Create, edit, clone, and delete intents
+- Edit intent JSON directly with validation
+- Changes are saved instantly and reflected in automations
+
+**How to access:**
+
+1. Open Home Assistant
+2. Click the **Intentsity** panel in the sidebar
+3. Use the editor to manage your intents visually
+
+### WebSocket API
+
+All intent CRUD operations are available via Home Assistant's WebSocket API. This enables advanced automations, scripting, and third-party integrations.
+
+**Example (list intents):**
+
+```
+{
+  "id": 1,
+  "type": "intentsity/list_intents",
+  "entry_id": "<your_config_entry_id>"
+}
+```
+
+See `custom_components/intentsity/websocket.py` for all available commands and payloads.
+
+### Backend Testing
+
+The backend coordinator and WebSocket API are covered by unit tests:
+
+- Coordinator: Data loading, error handling, and update logic
+- WebSocket: Handler registration and callability
+
+**To run all tests:**
+
+```
+./script/test -v
+```
+
+All tests must pass before submitting changes.
+
+---
 ## 🤝 Contributing
 
 Contributions are welcome! Please open an issue or pull request if you have suggestions or improvements.
