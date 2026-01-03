@@ -16,6 +16,6 @@ https://developers.home-assistant.io/docs/integration_fetching_data#coordinated-
 
 from __future__ import annotations
 
-from .base import IntentsityDataUpdateCoordinator
+from .base import IntentsCoordinator, IntentsityDataUpdateCoordinator
 
-__all__ = ["IntentsityDataUpdateCoordinator"]
+__all__ = ["IntentsCoordinator", "IntentsityDataUpdateCoordinator"]

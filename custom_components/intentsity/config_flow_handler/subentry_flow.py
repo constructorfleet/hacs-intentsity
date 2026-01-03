@@ -1,106 +1,75 @@
-"""
-Subentry flow template for intentsity.
+"""Subentry flow implementation for intents.
 
-This module provides a template for implementing subentry flows when needed.
-Subentry flows allow users to add multiple "sub-configurations" under a single
-config entry.
+This module implements a ConfigSubentryFlow to create and manage intent
+sub-entries. Each intent is stored via the integration's IntentsCoordinator.
 
-Example use case:
-- Weather integration: Main entry for API credentials, subentries for locations
-- Multi-device integration: Main entry for hub/account, subentries for devices
+Subentries created here will have their ``unique_id`` set to the intent id so
+they can be referenced and reconfigured later.
 
-This file is currently a template/example. Uncomment and adapt when implementing
-subentry support.
-
-For more information:
-https://developers.home-assistant.io/docs/config_entries_config_flow_handler#subentry-flows
+See: https://developers.home-assistant.io/docs/config_entries_config_flow_handler#subentry-flows
 """
 
-from __future__ import annotations
+from typing import Any, cast
 
-# Uncomment when implementing subentry flows:
-#
-# from typing import Any
-#
-# from homeassistant import config_entries
-# from homeassistant.config_entries import ConfigSubentryFlow, SubentryFlowResult
-#
-# class ExampleLocationSubentryFlowHandler(ConfigSubentryFlow):
-#     """
-#     Handle subentry flow for adding and modifying locations.
-#
-#     This is an example implementation. Adapt to your integration's needs.
-#     """
-#
-#     async def async_step_user(
-#         self,
-#         user_input: dict[str, Any] | None = None
-#     ) -> SubentryFlowResult:
-#         """User flow to add a new location."""
-#         if user_input is not None:
-#             # Validate and create subentry
-#             return self.async_create_subentry(
-#                 title=user_input["location_name"],
-#                 data=user_input,
-#             )
-#
-#         # Show form to collect location data
-#         return self.async_show_form(
-#             step_id="user",
-#             data_schema=vol.Schema({
-#                 vol.Required("location_name"): str,
-#                 vol.Required("latitude"): float,
-#                 vol.Required("longitude"): float,
-#             })
-#         )
-#
-#     async def async_step_reconfigure(
-#         self,
-#         user_input: dict[str, Any] | None = None
-#     ) -> SubentryFlowResult:
-#         """User flow to modify an existing location."""
-#         config_entry = self._get_entry()
-#         config_subentry = self._get_reconfigure_subentry()
-#
-#         if user_input is not None:
-#             # Validate and update subentry
-#             return self.async_update_subentry(
-#                 config_subentry,
-#                 data=user_input,
-#             )
-#
-#         # Show form pre-filled with current values
-#         return self.async_show_form(
-#             step_id="reconfigure",
-#             data_schema=vol.Schema({
-#                 vol.Required(
-#                     "location_name",
-#                     default=config_subentry.data.get("location_name")
-#                 ): str,
-#                 vol.Required(
-#                     "latitude",
-#                     default=config_subentry.data.get("latitude")
-#                 ): float,
-#                 vol.Required(
-#                     "longitude",
-#                     default=config_subentry.data.get("longitude")
-#                 ): float,
-#             })
-#         )
-#
-#
-# # Add to main ConfigFlow class:
-# #
-# # @classmethod
-# # @callback
-# # def async_get_supported_subentry_types(
-# #     cls,
-# #     config_entry: ConfigEntry
-# # ) -> dict[str, type[ConfigSubentryFlow]]:
-# #     """Return subentries supported by this integration."""
-# #     return {
-# #         "location": ExampleLocationSubentryFlowHandler
-# #     }
+import voluptuous as vol
+
+from custom_components.intentsity.coordinator.base import IntentsCoordinator
+from custom_components.intentsity.data import validate_intent_payload
+from homeassistant.config_entries import ConfigSubentryFlow, SubentryFlowResult
 
 
-__all__: list[str] = []  # Empty until subentry flows are implemented
+class IntentsSubentryFlowHandler(ConfigSubentryFlow):
+    """Handle subentry flow for creating and editing intents."""
+
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        """Show form to create a new intent or create it on submit."""
+        if user_input is not None:
+            payload = user_input["intent_payload"]
+            intent = validate_intent_payload(payload)
+
+            entry = self._get_entry()
+            intents_coord: IntentsCoordinator = entry.runtime_data.intents_coordinator
+            created = await intents_coord.async_create_intent(intent.to_dict())
+
+            # The base class stubs do not expose async_create_subentry to the type
+            # checker; cast to Any to call the helper method at runtime.
+            return cast(Any, self).async_create_subentry(
+                title=created.name,
+                data={"intent_id": created.id},
+                unique_id=created.id,
+            )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema({vol.Required("intent_payload"): dict}),
+        )
+
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        """Modify an existing subentry (intent)."""
+        config_entry = self._get_entry()
+        config_subentry = self._get_reconfigure_subentry()
+
+        intent_id = config_subentry.data.get("intent_id")
+        if not isinstance(intent_id, str):
+            return self.async_abort(reason="intent_not_found")
+
+        intents_coord: IntentsCoordinator = config_entry.runtime_data.intents_coordinator
+        existing_intent = await intents_coord.async_get_intent(intent_id)
+        if existing_intent is None:
+            return self.async_abort(reason="intent_not_found")
+
+        if user_input is not None:
+            update_payload = user_input["intent_payload"]
+            updated = await intents_coord.async_update_intent(existing_intent.id, update_payload)
+            return cast(Any, self).async_update_subentry(
+                config_subentry, data={"intent_id": updated.id}, title=updated.name
+            )
+
+        default = existing_intent.to_dict()
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema({vol.Required("intent_payload", default=default): dict}),
+        )
+
+
+__all__: list[str] = ["IntentsSubentryFlowHandler"]

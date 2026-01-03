@@ -1,10 +1,7 @@
-"""
-Config flow for intentsity.
+"""Config flow for intentsity.
 
-This module implements the main configuration flow including:
-- Initial user setup
-- Reconfiguration of existing entries
-- Reauthentication flow
+This module implements the main configuration flow including user setup,
+reconfiguration and reauthentication.
 
 For more information:
 https://developers.home-assistant.io/docs/config_entries_config_flow_handler
@@ -21,6 +18,7 @@ from custom_components.intentsity.config_flow_handler.schemas import (
     get_reconfigure_schema,
     get_user_schema,
 )
+from custom_components.intentsity.config_flow_handler.subentry_flow import IntentsSubentryFlowHandler
 from custom_components.intentsity.config_flow_handler.validators import validate_credentials
 from custom_components.intentsity.const import DOMAIN, LOGGER
 from homeassistant import config_entries
@@ -54,6 +52,17 @@ class IntentsityConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    @classmethod
+    def async_get_supported_subentry_types(
+        cls,
+        config_entry: config_entries.ConfigEntry,
+    ) -> dict[str, type[config_entries.ConfigSubentryFlow]]:
+        """Return subentries supported by this integration.
+
+        The key 'intent' is used by the UI to create intent subentries.
+        """
+        return {"intent": IntentsSubentryFlowHandler}
+
     @staticmethod
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
@@ -65,9 +74,7 @@ class IntentsityConfigFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
             The options flow instance for modifying integration options.
 
         """
-        from custom_components.intentsity.config_flow_handler.options_flow import (  # noqa: PLC0415
-            IntentsityOptionsFlow,
-        )
+        from custom_components.intentsity.config_flow_handler.options_flow import IntentsityOptionsFlow  # noqa: PLC0415
 
         return IntentsityOptionsFlow()
 

@@ -12,9 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import socket
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiohttp
+
+if TYPE_CHECKING:
+    from custom_components.intentsity.coordinator import IntentsCoordinator
 
 
 class IntentsityApiClientError(Exception):
@@ -100,6 +103,8 @@ class IntentsityApiClient:
         self._username = username
         self._password = password
         self._session = session
+        # Optional runtime reference to intents coordinator (injected by integration)
+        self.intents_coordinator: IntentsCoordinator | None = None
 
     async def async_get_data(self) -> Any:
         """
@@ -235,3 +240,38 @@ class IntentsityApiClient:
             raise IntentsityApiClientError(
                 msg,
             ) from exception
+
+    # ---- Intents persistence helpers (thin wrapper) ----
+    async def async_list_intents(self) -> list[dict]:
+        """List persisted intents via the intents coordinator if available."""
+        if not self.intents_coordinator:
+            raise NotImplementedError("Intents coordinator not available")
+        intents = await self.intents_coordinator.async_list_intents()
+        return [i.to_dict() for i in intents]
+
+    async def async_get_intent(self, intent_id: str) -> dict | None:
+        """Get a single intent by id via the intents coordinator."""
+        if not self.intents_coordinator:
+            raise NotImplementedError("Intents coordinator not available")
+        intent = await self.intents_coordinator.async_get_intent(intent_id)
+        return intent.to_dict() if intent else None
+
+    async def async_create_intent(self, payload: dict) -> dict:
+        """Create an intent via the intents coordinator."""
+        if not self.intents_coordinator:
+            raise NotImplementedError("Intents coordinator not available")
+        intent = await self.intents_coordinator.async_create_intent(payload)
+        return intent.to_dict()
+
+    async def async_update_intent(self, intent_id: str, payload: dict) -> dict:
+        """Update an intent via the intents coordinator."""
+        if not self.intents_coordinator:
+            raise NotImplementedError("Intents coordinator not available")
+        intent = await self.intents_coordinator.async_update_intent(intent_id, payload)
+        return intent.to_dict()
+
+    async def async_delete_intent(self, intent_id: str) -> None:
+        """Delete an intent via the intents coordinator."""
+        if not self.intents_coordinator:
+            raise NotImplementedError("Intents coordinator not available")
+        await self.intents_coordinator.async_delete_intent(intent_id)

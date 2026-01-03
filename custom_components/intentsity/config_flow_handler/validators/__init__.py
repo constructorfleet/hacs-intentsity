@@ -10,12 +10,6 @@ Package structure:
 - credentials.py: Credential validation and authentication
 - sanitizers.py: Input sanitization and normalization
 
-When validators grow (>300 lines per file), split further:
-- credentials/basic.py, credentials/oauth.py, credentials/api_key.py
-- sanitizers/text.py, sanitizers/network.py, sanitizers/identifiers.py
-- discovery/bluetooth.py, discovery/zeroconf.py, discovery/ssdp.py
-- devices/validation.py, devices/discovery.py
-
 All validators are re-exported from this __init__.py for convenient imports.
 """
 

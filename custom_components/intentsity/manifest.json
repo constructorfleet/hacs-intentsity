@@ -2,7 +2,7 @@
   "domain": "intentsity",
   "name": "Intentsity",
   "codeowners": [
-    "@constructorfleet"
+    "@Teagan42"
   ],
   "config_flow": true,
   "documentation": "https://github.com/constructorfleet/hacs-intentsity",

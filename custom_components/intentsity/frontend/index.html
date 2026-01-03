@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Intentsity — Simple UI</title>
+    <style>
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            margin: 1rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 6rem;
+        }
+
+        .intent {
+            border: 1px solid #ddd;
+            padding: .5rem;
+            margin-bottom: .5rem;
+        }
+
+        button {
+            margin-right: .5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Intentsity — Minimal UI</h1>
+
+    <p>
+        Config Entry ID: <input id="entry_id" placeholder="enter config entry id" style="width:40%" />
+        <button id="btn_refresh">Refresh</button>
+    </p>
+
+    <h2>Create Intent</h2>
+    <p>
+        Name: <input id="intent_name" />
+        Description: <input id="intent_description" style="width:50%" />
+    </p>
+    <p>
+        Full JSON payload (optional):
+        <textarea id="intent_payload">{"name":"","description":""}</textarea>
+    </p>
+    <p>
+        <button id="btn_create">Create Intent</button>
+    </p>
+
+    <h2>Stored Intents</h2>
+    <div id="intents_list">(no data)</div>
+
+    <script src="/api/intentsity/static/intentsity.js"></script>
+    <script>
+        const entryInput = document.getElementById('entry_id');
+        const listEl = document.getElementById('intents_list');
+
+        async function refresh() {
+            const entryId = entryInput.value.trim();
+            if (!entryId) {
+                listEl.innerText = 'Please provide an entry id above.';
+                return;
+            }
+            try {
+                const items = await window.intentsity.listIntents(entryId);
+                renderList(items || []);
+            } catch (err) {
+                listEl.innerText = 'Error: ' + (err && err.message ? err.message : String(err));
+            }
+        }
+
+        function renderList(items) {
+            if (!items.length) {
+                listEl.innerText = '(no intents)';
+                return;
+            }
+            listEl.innerHTML = '';
+            for (const it of items) {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'intent';
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(it, null, 2);
+                wrapper.appendChild(pre);
+                const del = document.createElement('button');
+                del.textContent = 'Delete';
+                del.onclick = async () => {
+                    if (!confirm('Delete intent ' + it.id + '?')) return;
+                    await window.intentsity.deleteIntent(entryInput.value.trim(), it.id);
+                    await refresh();
+                };
+                wrapper.appendChild(del);
+                listEl.appendChild(wrapper);
+            }
+        }
+
+        document.getElementById('btn_refresh').onclick = refresh;
+
+        document.getElementById('btn_create').onclick = async () => {
+            const entryId = entryInput.value.trim();
+            if (!entryId) { alert('Provide entry id'); return; }
+            let payload;
+            try {
+                payload = JSON.parse(document.getElementById('intent_payload').value);
+            } catch (err) {
+                alert('Invalid JSON payload');
+                return;
+            }
+            // Fill name/description when present in form
+            const name = document.getElementById('intent_name').value.trim();
+            const desc = document.getElementById('intent_description').value.trim();
+            if (name) payload.name = name;
+            if (desc) payload.description = desc;
+            try {
+                await window.intentsity.createIntent(entryId, payload);
+                await refresh();
+            } catch (err) {
+                alert('Error creating intent: ' + (err && err.message ? err.message : String(err)));
+            }
+        };
+
+        // Auto-refresh if hass is available and an entry id is set in query
+        window.addEventListener('load', () => {
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('entry_id')) entryInput.value = params.get('entry_id');
+            if (entryInput.value) refresh();
+        });
+    </script>
+</body>
+
+</html>

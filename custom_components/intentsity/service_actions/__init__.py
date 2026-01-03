@@ -9,6 +9,18 @@ from custom_components.intentsity.service_actions.example_service import (
     async_handle_example_action,
     async_handle_reload_data,
 )
+from custom_components.intentsity.service_actions.intents import (
+    SERVICE_CREATE_INTENT,
+    SERVICE_DELETE_INTENT,
+    SERVICE_EXPORT_INTENTS,
+    SERVICE_IMPORT_INTENTS,
+    SERVICE_UPDATE_INTENT,
+    async_handle_create_intent,
+    async_handle_delete_intent,
+    async_handle_export_intents,
+    async_handle_import_intents,
+    async_handle_update_intent,
+)
 from homeassistant.core import ServiceCall
 
 if TYPE_CHECKING:
@@ -70,5 +82,61 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             SERVICE_RELOAD_DATA,
             handle_reload_data,
         )
+
+    # Intent CRUD services
+    async def _handle_create_intent(call: ServiceCall) -> None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            LOGGER.warning("No config entries found for %s", DOMAIN)
+            return
+        entry = entries[0]
+        await async_handle_create_intent(hass, entry, call)
+
+    async def _handle_update_intent(call: ServiceCall) -> None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            LOGGER.warning("No config entries found for %s", DOMAIN)
+            return
+        entry = entries[0]
+        await async_handle_update_intent(hass, entry, call)
+
+    async def _handle_delete_intent(call: ServiceCall) -> None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            LOGGER.warning("No config entries found for %s", DOMAIN)
+            return
+        entry = entries[0]
+        await async_handle_delete_intent(hass, entry, call)
+
+    async def _handle_export_intents(call: ServiceCall) -> None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            LOGGER.warning("No config entries found for %s", DOMAIN)
+            return
+        entry = entries[0]
+        await async_handle_export_intents(hass, entry, call)
+
+    async def _handle_import_intents(call: ServiceCall) -> None:
+        entries = hass.config_entries.async_entries(DOMAIN)
+        if not entries:
+            LOGGER.warning("No config entries found for %s", DOMAIN)
+            return
+        entry = entries[0]
+        await async_handle_import_intents(hass, entry, call)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_CREATE_INTENT):
+        hass.services.async_register(DOMAIN, SERVICE_CREATE_INTENT, _handle_create_intent)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_UPDATE_INTENT):
+        hass.services.async_register(DOMAIN, SERVICE_UPDATE_INTENT, _handle_update_intent)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_DELETE_INTENT):
+        hass.services.async_register(DOMAIN, SERVICE_DELETE_INTENT, _handle_delete_intent)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_EXPORT_INTENTS):
+        hass.services.async_register(DOMAIN, SERVICE_EXPORT_INTENTS, _handle_export_intents)
+
+    if not hass.services.has_service(DOMAIN, SERVICE_IMPORT_INTENTS):
+        hass.services.async_register(DOMAIN, SERVICE_IMPORT_INTENTS, _handle_import_intents)
 
     LOGGER.debug("Services registered for %s", DOMAIN)
