@@ -1,0 +1,13 @@
+{
+  "domain": "intentsity",
+  "name": "Intentsity",
+  "codeowners": [
+    "@constructorfleet"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/constructorfleet/hacs-intentsity",
+  "integration_type": "hub",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/constructorfleet/hacs-intentsity/issues",
+  "version": "0.1.0"
+}
