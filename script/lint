@@ -36,7 +36,7 @@ log_header "Running Ruff format"
 ruff format .
 
 log_header "Running Ruff check"
-ruff check . --fix
+ruff check . --fix --unsafe-fixes
 
 # Clean up any accidental package installation from uv run
 "$SCRIPT_DIR/clean" --minimal

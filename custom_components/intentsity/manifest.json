@@ -1,6 +1,9 @@
 {
   "domain": "intentsity",
   "name": "Intentsity",
+  "after_dependencies": [
+    "http"
+  ],
   "codeowners": [
     "@Teagan42"
   ],

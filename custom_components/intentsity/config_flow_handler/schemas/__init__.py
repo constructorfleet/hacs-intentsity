@@ -1,19 +1,15 @@
 """
 Data schemas for config flow forms.
 
-This package contains all voluptuous schemas used in config flows, options flows,
-and subentry flows. Schemas are organized into separate modules for better
-maintainability as the integration grows.
+This package contains all schemas used in config flows, options flows,
+and subentry flows. Schemas are organized into separate modules for maintainability.
+
+Note: All user, reauth, and reconfigure schemas are now no-op (no credential fields).
 
 Package structure:
------------------
+------------------
 - config.py: Main config flow schemas (user, reauth, reconfigure)
 - options.py: Options flow schemas
-
-When schemas grow (>300 lines per file), split further:
-- config/user.py, config/reauth.py, config/reconfigure.py
-- options/basic.py, options/advanced.py
-- subentries/device.py, subentries/location.py
 
 All schemas are re-exported from this __init__.py for convenient imports.
 """

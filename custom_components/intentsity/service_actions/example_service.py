@@ -5,18 +5,15 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from custom_components.intentsity.const import LOGGER
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
 if TYPE_CHECKING:
-    from custom_components.intentsity.data import IntentsityConfigEntry
     from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse
 
 
 async def async_handle_example_action(
     hass: HomeAssistant,
-    entry: IntentsityConfigEntry,
+    entry,
     call: ServiceCall,
 ) -> None:
     """
@@ -30,12 +27,6 @@ async def async_handle_example_action(
         call: Service call data
     """
     LOGGER.info("Example action service called with data: %s", call.data)
-
-    # Example: Access the coordinator
-    # coordinator = entry.runtime_data.coordinator
-
-    # Example: Access the API client
-    # client = entry.runtime_data.client
 
     # Example: Do something with the service call data
     action_type = call.data.get("action_type", "default")
@@ -59,7 +50,7 @@ async def async_handle_example_action(
 
 async def async_handle_reload_data(
     hass: HomeAssistant,
-    entry: IntentsityConfigEntry,
+    entry,
     call: ServiceCall,
 ) -> ServiceResponse:
     """
@@ -78,41 +69,9 @@ async def async_handle_reload_data(
     """
     LOGGER.info("Reload data service called")
 
-    # Access the coordinator and trigger a refresh
-    coordinator = entry.runtime_data.coordinator
-    start_time = dt_util.now()
-
-    try:
-        await coordinator.async_request_refresh()
-    except (UpdateFailed, ConfigEntryAuthFailed, ConfigEntryNotReady) as exception:
-        LOGGER.exception("Failed to reload data: %s", exception)
-        # Return error response instead of raising
-        return {
-            "status": "error",
-            "timestamp": dt_util.now().isoformat(),
-            "error": str(exception),
-            "error_type": type(exception).__name__,
-        }
-    else:
-        end_time = dt_util.now()
-        duration_ms = (end_time - start_time).total_seconds() * 1000
-
-        # Count records in coordinator data
-        data_size = len(str(coordinator.data)) if coordinator.data else 0
-        record_count = len(coordinator.data) if isinstance(coordinator.data, dict) else 0
-
-        response_data: ServiceResponse = {
-            "status": "success",
-            "timestamp": end_time.isoformat(),
-            "duration_ms": round(duration_ms, 2),
-            "record_count": record_count,
-            "data_size_bytes": data_size,
-            "last_update_success": coordinator.last_update_success,
-        }
-
-        LOGGER.info(
-            "Data reload completed successfully in %.2fms with %d records",
-            duration_ms,
-            record_count,
-        )
-        return response_data
+    # No coordinator to refresh; just log and return success
+    LOGGER.info("Reload data service called (noop)")
+    return {
+        "status": "success",
+        "timestamp": dt_util.now().isoformat(),
+    }

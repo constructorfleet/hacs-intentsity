@@ -172,6 +172,7 @@ The integration provides diagnostic data for troubleshooting:
 3. Click on the device
 4. Click **Download Diagnostics**
 
+
 Diagnostic data includes:
 
 - Connection status
@@ -179,8 +180,14 @@ Diagnostic data includes:
 - API response data
 - Entity states
 - Error history
+- **Redacted sensitive fields:** API keys, tokens, passwords, and personal information are automatically redacted for privacy and security.
 
-**Privacy note:** Diagnostic data may contain sensitive information. Review before sharing.
+**Repairs support:**
+
+- The integration provides automated repair flows for common issues (e.g., deprecated API endpoints, missing configuration, storage migration problems).
+- Repairs can be triggered from the Home Assistant Repairs panel and will guide you through resolving issues or updating configuration.
+
+**Privacy note:** Diagnostic data is redacted before sharing. Sensitive fields (API keys, tokens, passwords, PII) are never included in diagnostics downloads.
 
 ## Blueprints
 

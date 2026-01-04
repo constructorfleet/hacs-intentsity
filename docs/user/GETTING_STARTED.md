@@ -6,7 +6,6 @@ This guide will help you install and set up the Intentsity custom integration fo
 
 - Home Assistant 2026.7.0 or newer
 - HACS (Home Assistant Community Store) installed
-- Network connectivity to [external service/device]
 
 ## Installation
 
@@ -39,56 +38,29 @@ After installation, add the integration:
 3. Search for "Intentsity"
 4. Follow the configuration steps:
 
-### Step 1: Connection Information
+### Step 1: Create Intents
 
-Enter the required connection details:
+Use the frontend panel to manage intents:
 
-- **Host/IP Address:** The hostname or IP address of your device/service
-- **API Key/Token:** Your authentication credentials (if applicable)
-- **Port:** Connection port (default: 8080)
+1. Open the Intentsity panel from the Home Assistant sidebar.
+2. Use the "List Intents" button to view existing intents.
+3. Use the "Create Intent" form to add new intents.
 
-Click **Submit** to test the connection.
+### Step 2: Manage Intents
 
-### Step 2: Configuration Options
+You can update or delete intents using the frontend panel:
 
-Configure optional settings:
-
-- **Update Interval:** How often to poll for updates (default: 5 minutes)
-- **Name:** Friendly name for this integration instance
-
-Click **Submit** to complete setup.
+- **Update Intent**: Select an intent and modify its details.
+- **Delete Intent**: Remove an intent from the store.
 
 ## What Gets Created
 
-After successful setup, the integration creates:
+The integration does not create devices or entities. Instead, it manages intents directly within Home Assistant.
 
-### Devices
+### Intents
 
-- **Device Name:** Main device representing your connected service/hardware
-  - Model information
-  - Software version
-  - Configuration URL (link to device web interface)
-
-### Entities
-
-The following entities are automatically created:
-
-#### Sensors
-
-- `sensor.<device_name>_<sensor_name>` - Descriptive sensor measurements
-- More sensors as applicable to your setup
-
-#### Binary Sensors
-
-- `binary_sensor.<device_name>_<sensor_name>` - On/off status indicators
-
-#### Switches
-
-- `switch.<device_name>_<switch_name>` - Controllable on/off switches
-
-#### Other Platforms
-
-Additional entities may be created depending on your device capabilities.
+- Intents are stored locally and can be used in automations and scripts.
+- Use the frontend panel to manage intents efficiently.
 
 ## First Steps
 

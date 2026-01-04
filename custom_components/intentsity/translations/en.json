@@ -2,30 +2,17 @@
   "config": {
     "step": {
       "user": {
-        "description": "If you need help with the configuration have a look here: https://github.com/constructorfleet/hacs-intentsity",
-        "data": {
-          "username": "Username",
-          "password": "Password"
-        }
+        "description": "If you need help with the configuration have a look here: https://github.com/constructorfleet/hacs-intentsity"
       },
       "reconfigure": {
-        "description": "Update the credentials for this integration.",
-        "data": {
-          "username": "Username",
-          "password": "Password"
-        }
+        "description": "No configuration required."
       },
       "reauth_confirm": {
-        "title": "Reauthenticate Integration",
-        "description": "The credentials for {username} are no longer valid. Please provide updated credentials to restore access.",
-        "data": {
-          "username": "Username",
-          "password": "Password"
-        }
+        "title": "Reauthentication Not Required",
+        "description": "This integration does not require credentials."
       }
     },
     "error": {
-      "auth": "Username/Password is wrong.",
       "connection": "Unable to connect to the server.",
       "unknown": "Unknown error occurred."
     },
@@ -52,9 +39,6 @@
     }
   },
   "exceptions": {
-    "authentication_failed": {
-      "message": "Authentication failed during data update."
-    },
     "update_failed": {
       "message": "Failed to update data from the server."
     },
