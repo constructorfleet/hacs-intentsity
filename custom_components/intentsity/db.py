@@ -297,6 +297,10 @@ class IntentsityDBClient:
     ) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
+            pipeline = session.get(PipelineRunRow, run_id)
+            if pipeline is None:
+                raise ValueError(f"Pipeline run {run_id} does not exist")
+
             review = session.get(IntentReviewRow, run_id)
             if review is None:
                 review = IntentReviewRow(run_id=run_id)

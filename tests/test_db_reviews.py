@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import pytest
 from custom_components.intentsity import db
 from custom_components.intentsity.models import (
     ExpectedIntentEndRecord,
@@ -93,3 +94,36 @@ def test_save_review_replaces_existing_rows(hass: HomeAssistant) -> None:
     assert run.review.expected_end is not None
     assert run.review.expected_end.intent_output is None
     assert run.review.expected_end.processed_locally is True
+
+
+def test_fetch_recent_runs_orders_desc_and_limits(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    base = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    for idx in range(3):
+        run_id = f"run-{idx}"
+        db.upsert_pipeline_run(
+            hass,
+            run_id,
+            {
+                "created_at": base + timedelta(minutes=idx),
+                "name": f"Run {idx}",
+            },
+        )
+
+    runs = db.fetch_recent_runs(hass, 2).runs
+    assert [run.run_id for run in runs] == ["run-2", "run-1"]
+    assert [run.name for run in runs] == ["Run 2", "Run 1"]
+
+
+def test_save_review_requires_existing_run(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+
+    with pytest.raises(ValueError):
+        db.save_review(
+            hass,
+            "missing-run",
+            intent_start_id=None,
+            matched_expectations=False,
+            expected_progress=[],
+            expected_end=None,
+        )
