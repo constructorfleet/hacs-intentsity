@@ -6,14 +6,17 @@ from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
 
+import voluptuous as vol
+
 from homeassistant.components.assist_pipeline.pipeline import (
     PipelineEvent,
     PipelineEventType,
     PipelineRun,
 )
-from homeassistant.components.frontend import async_register_built_in_panel
+from homeassistant.components.frontend import add_extra_js_url, async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import db, view, websocket
@@ -36,6 +39,10 @@ LOGGABLE_EVENTS = {
     PipelineEventType.INTENT_END,
     PipelineEventType.INTENT_PROGRESS,
 }
+
+CONFIG_SCHEMA = vol.Schema({
+    vol.Optional(DOMAIN): vol.Schema({}),
+}, extra=vol.ALLOW_EXTRA,)
 
 
 def _resolve_run_id(run: PipelineRun) -> str:
@@ -75,14 +82,25 @@ async def _async_initialize(hass: HomeAssistant) -> None:
 
     if not domain_data.get(DATA_API_REGISTERED):
         websocket.async_register_commands(hass)
-        hass.http.register_view(view.IntentPanelView())
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(
+                "/intentsity_panel.js",
+                hass.config.path("custom_components/intentsity/panel.js"),
+                True,
+            ),
+        ])
         async_register_built_in_panel(
             hass,
-            component_name="iframe",
+            component_name="custom",
             sidebar_title="Intent Review",
             sidebar_icon="mdi:text-box-search",
-            frontend_url_path=view.PANEL_URL_PATH,
-            config={"url": view.PANEL_URL},
+            frontend_url_path="intentsity",
+            config={
+                "_panel_custom": {
+                    "name": "intentsity-panel",
+                    "js_url": "/intentsity_panel.js?6",
+                }
+            },
             require_admin=True,
         )
         domain_data[DATA_API_REGISTERED] = True
