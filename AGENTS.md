@@ -20,6 +20,8 @@ This repository ships a Home Assistant custom component that records Assist Pipe
 3. **Non-blocking I/O** – heavy DB reads/writes must run inside `async_add_executor_job`.
 4. **Document Changes** – update README/changelog whenever the API, schema, or UX shifts.
 5. **Tests & Linters** – extend `tests/` or add new suites when behavior changes; ensure pytest passes locally.
+6. **Review Dependencies** – mirror new Python requirements in both `pyproject.toml` and `manifest.json` before release.
+7. **Panel Assets** – keep the iframe HTML and associated assets in sync with API changes; never inline large HTML blobs inside Python.
 
 ## Quality Bar & Checks
 - Keep logs actionable and avoid noisy tracebacks.
@@ -29,3 +31,18 @@ This repository ships a Home Assistant custom component that records Assist Pipe
 - When altering the DB schema, include migration notes and bump the manifest version.
 - Enforce at least 90% pytest coverage on every change; add or update tests until the threshold is met.
 - Commit each completed unit of work immediately using conventional commit messages (e.g., `feat(runtime): add pipeline patch`).
+- Run `uv run pytest --cov=custom_components/intentsity --cov=tests` before opening a PR and paste the summary into the review notes.
+- For behavioral changes, capture screenshots/GIFs of the panel showing the new UX and attach them to the PR.
+
+## Release Checklist
+- [ ] `manifest.json` version bumped and matches `pyproject.toml`.
+- [ ] Dependencies pinned with compatible ranges (no bare `*`).
+- [ ] README feature list and API endpoints reflect the new behavior.
+- [ ] Tests pass on macOS and Linux runners (`uv run pytest ...`).
+- [ ] Coverage report ≥90% overall.
+- [ ] Conventional commits squashed/stacked logically (docs, feat, fix, test, chore).
+
+## Troubleshooting Tips
+- Use `uv run pytest tests/test_runtime.py -k intent` to quickly iterate on logging regressions.
+- If the panel fails to load, check the browser console for CSP errors and verify the iframe URL matches `_PANEL_URL_PATH`.
+- For database migration issues, delete `intentsity.db` locally and rerun `async_setup`; in production, ship an upgrade script before deploying breaking schema changes.
