@@ -105,6 +105,10 @@ async def test_patched_process_event_persists_intents(hass: HomeAssistant) -> No
         PipelineEventType.INTENT_END.value,
         PipelineEventType.INTENT_START.value,
     ]
+    end_payload = events[0].raw_event
+    assert "intent_end" in end_payload
+    assert "intent_start" in end_payload
+    assert end_payload["intent_start"]["data"]["intent_type"] == "AssistMedia"
     assert recorded == [
         PipelineEventType.INTENT_START.value,
         PipelineEventType.INTENT_END.value,

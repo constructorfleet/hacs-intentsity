@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 import logging
 
@@ -31,6 +31,7 @@ _ORIGINAL_PROCESS_EVENT: OriginalProcessEvent | None = None
 
 DATA_DB_INITIALIZED = "db_initialized"
 DATA_API_REGISTERED = "api_registered"
+DATA_PENDING_START = "pending_intent_start"
 LOGGABLE_EVENTS = {
     PipelineEventType.INTENT_START,
     PipelineEventType.INTENT_END,
@@ -119,13 +120,28 @@ def _restore_pipeline_patch() -> None:
 
 async def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
     hass: HomeAssistant = self.hass
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    pending_starts: dict[str, Any] = domain_data.setdefault(DATA_PENDING_START, {})
+    run_id = _resolve_run_id(self)
 
     if event.type in LOGGABLE_EVENTS:
+        raw_event = asdict(event)
+
+        if event.type is PipelineEventType.INTENT_START:
+            pending_starts[run_id] = raw_event
+        elif event.type is PipelineEventType.INTENT_END:
+            start_payload = pending_starts.pop(run_id, None)
+            if start_payload is not None:
+                raw_event = {
+                    "intent_start": start_payload,
+                    "intent_end": raw_event,
+                }
+
         payload = LoggedIntentEvent(
-            run_id=_resolve_run_id(self),
+            run_id=run_id,
             event_type=event.type.value,
             intent_type=_extract_intent_type(event),
-            raw_event=asdict(event),
+            raw_event=raw_event,
         )
 
         try:
