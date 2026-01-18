@@ -300,6 +300,74 @@ async def test_websocket_save_review_validates_single_end(hass: HomeAssistant) -
 
 
 @pytest.mark.asyncio
+async def test_websocket_save_review_requires_end_step(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    run_id = "run-review-missing-end"
+    db.upsert_pipeline_run(
+        hass,
+        run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "Missing End"},
+    )
+    db.insert_intent_start(hass, IntentStartRecord(run_id=run_id, intent_input="Test"))
+
+    connection = _WsConnectionStub()
+    await websocket.websocket_save_review(
+        hass,
+        cast(Any, connection),
+        {
+            "id": 77,
+            "type": const.WS_CMD_SAVE_REVIEW,
+            "run_id": run_id,
+            "steps": [],
+        },
+    )
+
+    assert connection.sent_errors
+    assert connection.sent_errors[-1]["code"] == "invalid_review"
+    assert "INTENT_END" in connection.sent_errors[-1]["message"]
+
+
+@pytest.mark.asyncio
+async def test_websocket_save_review_dispatches_signal(hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch) -> None:
+    _setup_fresh_db(hass)
+    run_id = "run-review-dispatch"
+    db.upsert_pipeline_run(
+        hass,
+        run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "Dispatch"},
+    )
+    db.insert_intent_start(hass, IntentStartRecord(run_id=run_id, intent_input="Test"))
+
+    dispatched: list[tuple[Any, Any]] = []
+
+    def _capture_dispatch(hass_arg: HomeAssistant, signal: str, *args: Any, **kwargs: Any) -> None:
+        dispatched.append((hass_arg, signal))
+
+    monkeypatch.setattr(websocket, "async_dispatcher_send", _capture_dispatch)
+
+    connection = _WsConnectionStub()
+    await websocket.websocket_save_review(
+        hass,
+        cast(Any, connection),
+        {
+            "id": 88,
+            "type": const.WS_CMD_SAVE_REVIEW,
+            "run_id": run_id,
+            "steps": [
+                {
+                    "order_index": 0,
+                    "kind": "end",
+                    "intent_output": {"speech": "done"},
+                }
+            ],
+        },
+    )
+
+    assert dispatched and dispatched[0][1] == const.SIGNAL_EVENT_RECORDED
+    assert connection.sent_results[-1]["result"] == {"status": "saved"}
+
+
+@pytest.mark.asyncio
 async def test_async_setup_registers_views_once(hass: HomeAssistant) -> None:
     intentsity._ORIGINAL_PROCESS_EVENT = None
     original_process = PipelineRun.process_event
