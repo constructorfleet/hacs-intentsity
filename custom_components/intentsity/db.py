@@ -13,7 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from .const import DB_NAME, DOMAIN
 from .models import IntentEventRecord, LoggedIntentEvent, intent_event_from_row
 
-_ENGINE_KEY: Final = "engine"
+_CLIENT_KEY: Final = "db_client"
 
 
 class _DBBase(DeclarativeBase):
@@ -35,64 +35,89 @@ def get_db_path(hass: HomeAssistant) -> Path:
     return Path(hass.config.path(DB_NAME))
 
 
-def _get_engine(hass: HomeAssistant) -> Engine:
+class IntentsityDBClient:
+    """Encapsulates all database interactions for Intentsity."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._hass = hass
+        self._engine: Engine | None = None
+
+    def ensure_initialized(self) -> None:
+        engine = self._get_engine()
+        _DBBase.metadata.create_all(engine)
+
+    def insert_event(self, payload: LoggedIntentEvent) -> None:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            session.add(
+                IntentEventRow(
+                    run_id=payload.run_id,
+                    timestamp=payload.timestamp,
+                    event_type=payload.event_type,
+                    intent_type=payload.intent_type,
+                    raw_event=json.dumps(payload.raw_event, default=str),
+                )
+            )
+            session.commit()
+
+    def fetch_recent_events(self, limit: int) -> list[IntentEventRecord]:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            stmt = select(IntentEventRow).order_by(IntentEventRow.id.desc()).limit(limit)
+            rows = session.execute(stmt).scalars().all()
+
+        return [
+            intent_event_from_row(
+                {
+                    "run_id": row.run_id,
+                    "timestamp": row.timestamp.isoformat(),
+                    "event_type": row.event_type,
+                    "intent_type": row.intent_type,
+                    "raw_event": row.raw_event,
+                }
+            )
+            for row in rows
+        ]
+
+    def dispose(self) -> None:
+        if self._engine is not None:
+            self._engine.dispose()
+            self._engine = None
+
+    def _get_engine(self) -> Engine:
+        if self._engine is None:
+            db_path = get_db_path(self._hass)
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._engine = create_engine(f"sqlite:///{db_path}", future=True)
+        return self._engine
+
+
+def _get_client(hass: HomeAssistant) -> IntentsityDBClient:
     domain_data = hass.data.setdefault(DOMAIN, {})
-    engine: Engine | None = domain_data.get(_ENGINE_KEY)
-
-    if engine is None:
-        db_path = get_db_path(hass)
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        engine = create_engine(f"sqlite:///{db_path}", future=True)
-        domain_data[_ENGINE_KEY] = engine
-
-    return engine
+    client: IntentsityDBClient | None = domain_data.get(_CLIENT_KEY)
+    if client is None:
+        client = IntentsityDBClient(hass)
+        domain_data[_CLIENT_KEY] = client
+    return client
 
 
-def dispose_engine(hass: HomeAssistant) -> None:
+def dispose_client(hass: HomeAssistant) -> None:
     domain_data = hass.data.get(DOMAIN)
     if not isinstance(domain_data, dict):
         return
 
-    engine: Engine | None = domain_data.pop(_ENGINE_KEY, None)
-    if engine is not None:
-        engine.dispose()
+    client: IntentsityDBClient | None = domain_data.pop(_CLIENT_KEY, None)
+    if client is not None:
+        client.dispose()
 
 
 def init_db(hass: HomeAssistant) -> None:
-    engine = _get_engine(hass)
-    _DBBase.metadata.create_all(engine)
+    _get_client(hass).ensure_initialized()
 
 
 def insert_event(hass: HomeAssistant, payload: LoggedIntentEvent) -> None:
-    engine = _get_engine(hass)
-    with Session(engine) as session:
-        session.add(
-            IntentEventRow(
-                run_id=payload.run_id,
-                timestamp=payload.timestamp,
-                event_type=payload.event_type,
-                intent_type=payload.intent_type,
-                raw_event=json.dumps(payload.raw_event, default=str),
-            )
-        )
-        session.commit()
+    _get_client(hass).insert_event(payload)
 
 
 def fetch_recent_events(hass: HomeAssistant, limit: int) -> list[IntentEventRecord]:
-    engine = _get_engine(hass)
-    with Session(engine) as session:
-        stmt = select(IntentEventRow).order_by(IntentEventRow.id.desc()).limit(limit)
-        rows = session.execute(stmt).scalars().all()
-
-    return [
-        intent_event_from_row(
-            {
-                "run_id": row.run_id,
-                "timestamp": row.timestamp.isoformat(),
-                "event_type": row.event_type,
-                "intent_type": row.intent_type,
-                "raw_event": row.raw_event,
-            }
-        )
-        for row in rows
-    ]
+    return _get_client(hass).fetch_recent_events(limit)

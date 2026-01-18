@@ -19,7 +19,7 @@ from homeassistant.core import HomeAssistant
 def _setup_fresh_db(hass: HomeAssistant) -> Path:
     db_path = db.get_db_path(hass)
     db_path.unlink(missing_ok=True)
-    db.dispose_engine(hass)
+    db.dispose_client(hass)
     db.init_db(hass)
     return db_path
 

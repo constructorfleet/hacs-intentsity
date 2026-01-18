@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from typing import Awaitable, Callable
+from dataclasses import asdict
+from typing import Callable
+
+import logging
 
 from homeassistant.components.assist_pipeline.pipeline import (
     PipelineEvent,
@@ -9,15 +12,17 @@ from homeassistant.components.assist_pipeline.pipeline import (
 )
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 
 from . import db, view
 from .const import DOMAIN
 from .models import LoggedIntentEvent
 
+_LOGGER = logging.getLogger(__name__)
+
 
 _ORIGINAL_PROCESS_EVENT: (
-    Callable[[PipelineRun, PipelineEvent], Awaitable[None]] | None
+    Callable[[PipelineRun, PipelineEvent], None] | None
 ) = None
 
 DATA_DB_INITIALIZED = "db_initialized"
@@ -40,7 +45,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _restore_pipeline_patch()
-    await hass.async_add_executor_job(db.dispose_engine, hass)
+    await hass.async_add_executor_job(db.dispose_client, hass)
     hass.data.pop(DOMAIN, None)
     return True
 
@@ -62,7 +67,7 @@ async def _async_initialize(hass: HomeAssistant) -> None:
             component_name="iframe",
             sidebar_title="Intent Review",
             sidebar_icon="mdi:text-box-search",
-            url_path=view.PANEL_URL_PATH,
+            frontend_url_path=view.PANEL_URL_PATH,
             config={"url": view.PANEL_URL},
             require_admin=True,
         )
@@ -77,37 +82,39 @@ def _ensure_pipeline_patched(hass: HomeAssistant) -> None:
 
     _ORIGINAL_PROCESS_EVENT = PipelineRun.process_event
     PipelineRun.process_event = _patched_process_event  # type: ignore[assignment]
-    hass.logger.info("[intentsity] PipelineRun.process_event patched")
+    _LOGGER.info("[intentsity] PipelineRun.process_event patched")
 
 
 def _restore_pipeline_patch() -> None:
+    import types
     global _ORIGINAL_PROCESS_EVENT
 
     if _ORIGINAL_PROCESS_EVENT is None:
         return
 
-    PipelineRun.process_event = _ORIGINAL_PROCESS_EVENT
+    # Restore as a method
+    PipelineRun.process_event = _ORIGINAL_PROCESS_EVENT  # type: ignore[assignment]
     _ORIGINAL_PROCESS_EVENT = None
 
 
-async def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
+@callback
+def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
     hass: HomeAssistant = self.hass
 
     if event.type in LOGGABLE_EVENTS:
         payload = LoggedIntentEvent(
-            run_id=self.run_id,
+            run_id=self.id,
             event_type=event.type.value,
             intent_type=getattr(event.data, "intent_type", None),
-            raw_event=event.as_dict(),
+            raw_event=asdict(event),
         )
         try:
-            await hass.async_add_executor_job(db.insert_event, hass, payload)
+            hass.async_add_executor_job(db.insert_event, hass, payload)
         except Exception as err:  # pragma: no cover - defensive logging
-            hass.logger.warning(
+            _LOGGER.warning(
                 "[intentsity] Failed to record intent event: %s",
                 err,
             )
 
     if _ORIGINAL_PROCESS_EVENT is not None:
-        await _ORIGINAL_PROCESS_EVENT(self, event)
-
+        _ORIGINAL_PROCESS_EVENT(self, event)

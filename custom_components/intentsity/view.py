@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from aiohttp import web
-from homeassistant.components.http import HomeAssistantView
+
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.http import HomeAssistantView
 
 from .const import DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT
 from .db import fetch_recent_events
