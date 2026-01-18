@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13.1"
 dependencies = [
+    "homeassistant>=2025.4.4",
     "pydantic>=2.12.5",
     "sqlalchemy>=2.0.0",
 ]
