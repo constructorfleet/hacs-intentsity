@@ -1,0 +1,15 @@
+{
+    "domain": "intentsity",
+    "name": "Intentsity",
+    "version": "0.1.0",
+    "documentation": "https://github.com/constructorfleet/intentsity",
+    "requirements": [
+        "pydantic>=2.5.0",
+        "sqlalchemy>=2.0.0"
+    ],
+    "dependencies": [],
+    "codeowners": [
+        "@teagan42"
+    ],
+    "iot_class": "local_push"
+}
