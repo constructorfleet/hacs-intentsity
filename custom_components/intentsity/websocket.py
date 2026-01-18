@@ -102,7 +102,7 @@ def _normalize_review_steps(
     raw_steps: list[dict[str, Any]],
 ) -> tuple[list[ExpectedIntentProgressRecord], ExpectedIntentEndRecord | None]:
     if not raw_steps:
-        return [], None
+        raise vol.Invalid("A review must include an INTENT_END step")
 
     ordered_steps = sorted(raw_steps, key=lambda item: int(item.get("order_index", 0)))
     progress: list[ExpectedIntentProgressRecord] = []
