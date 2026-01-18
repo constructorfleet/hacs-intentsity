@@ -1,0 +1,30 @@
+{
+  "name": "intentsity",
+  "version": "1.0.0",
+  "description": "A Home Assistant custom component that records Assist Pipeline intent events and surfaces them for dataset review.",
+  "homepage": "https://github.com/constructorfleet/hacs-intentsity#readme",
+  "bugs": {
+    "url": "https://github.com/constructorfleet/hacs-intentsity/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/constructorfleet/hacs-intentsity.git"
+  },
+  "license": "ISC",
+  "author": "@Teagan42",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "rollup -c"
+  },
+  "dependencies": {
+    "@babel/core": "^7.28.6",
+    "@rollup/plugin-babel": "^6.1.0",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "lit": "^3.3.2",
+    "rollup": "^4.55.1",
+    "rollup-plugin-typescript2": "^0.36.0",
+    "typescript": "^5.9.3"
+  }
+}
