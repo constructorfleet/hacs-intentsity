@@ -2,10 +2,12 @@
     "domain": "intentsity",
     "name": "Intentsity",
     "version": "0.1.0",
+    "config_flow": true,
     "documentation": "https://github.com/constructorfleet/intentsity",
     "requirements": [
         "pydantic>=2.5.0",
-        "sqlalchemy>=2.0.0"
+        "sqlalchemy>=2.0.0",
+        "voluptuous>=0.13.1"
     ],
     "dependencies": [],
     "codeowners": [

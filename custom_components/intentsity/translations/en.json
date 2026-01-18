@@ -1,0 +1,14 @@
+{
+    "title": "Intentsity",
+    "config": {
+        "step": {
+            "user": {
+                "title": "Intentsity",
+                "description": "Set up Assist intent logging for dataset review."
+            }
+        },
+        "abort": {
+            "single_instance_allowed": "Only one Intentsity instance can be configured."
+        }
+    }
+}

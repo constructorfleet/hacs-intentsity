@@ -11,7 +11,8 @@ A Home Assistant custom component that records Assist Pipeline intent events and
 ## Installation
 1. Copy the `custom_components/intentsity` folder into your Home Assistant `config/custom_components` directory.
 2. Restart Home Assistant.
-3. After startup, open the **Assist Intent Review** sidebar entry (admin users only).
+3. In **Settings → Devices & Services**, click **+ Add Integration** and select **Intentsity** to run the config flow (single instance only).
+4. After setup, open the **Assist Intent Review** sidebar entry (admin users only).
 
 ## Usage
 - Use the sidebar panel to filter the latest 100 entries (adjustable up to 500) and inspect their payloads.

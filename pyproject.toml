@@ -8,6 +8,7 @@ dependencies = [
     "homeassistant>=2025.4.4",
     "pydantic>=2.12.5",
     "sqlalchemy>=2.0.0",
+    "voluptuous>=0.13.1",
 ]
 
 [tool.pytest.ini_options]
