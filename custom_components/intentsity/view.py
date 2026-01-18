@@ -5,13 +5,15 @@ from aiohttp import web
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.http import HomeAssistantView
 
-from .const import DEFAULT_EVENT_LIMIT, MAX_EVENT_LIMIT
-from .db import fetch_recent_events
-from .models import IntentEventListResponse
+from .const import (
+    DEFAULT_EVENT_LIMIT,
+    MAX_EVENT_LIMIT,
+    WS_CMD_LIST_EVENTS,
+    WS_CMD_SUBSCRIBE_EVENTS,
+)
 
 PANEL_URL_PATH = "intentsity"
 PANEL_URL = f"/{PANEL_URL_PATH}"
-EVENTS_API_PATH = "/api/intentsity/events"
 
 _PANEL_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -53,18 +55,29 @@ _PANEL_HTML_TEMPLATE = """
         <tbody id=\"intent-table\"></tbody>
     </table>
     <script>
-    async function loadEvents() {
-        const limitInput = document.getElementById('limit');
-        const limit = Math.max(1, Math.min(500, parseInt(limitInput.value || '100', 10)));
-        const response = await fetch('__EVENTS_API_PATH__?limit=' + limit, {credentials: 'same-origin'});
-        if (!response.ok) {
-            alert('Failed to load events');
-            return;
+    const DEFAULT_LIMIT = __DEFAULT_LIMIT__;
+    const MAX_LIMIT = __MAX_LIMIT__;
+    const LIST_COMMAND = '__WS_LIST_CMD__';
+    const SUBSCRIBE_COMMAND = '__WS_SUB_CMD__';
+    let unsubscribe = null;
+
+    function clampLimit(raw) {
+        const value = Number.isFinite(raw) ? raw : DEFAULT_LIMIT;
+        return Math.max(1, Math.min(MAX_LIMIT, value || DEFAULT_LIMIT));
+    }
+
+    async function getConnection() {
+        if (!window.hassConnection) {
+            throw new Error('Home Assistant connection unavailable');
         }
-        const data = await response.json();
+        const {conn} = await window.hassConnection;
+        return conn;
+    }
+
+    function renderEvents(events) {
         const tbody = document.getElementById('intent-table');
         tbody.innerHTML = '';
-        data.events.forEach(event => {
+        events.forEach(event => {
             const row = document.createElement('tr');
             row.innerHTML = `
                 <td>${new Date(event.timestamp).toLocaleString()}</td>
@@ -76,34 +89,62 @@ _PANEL_HTML_TEMPLATE = """
             tbody.appendChild(row);
         });
     }
+
+    async function requestSnapshot(limit) {
+        try {
+            const conn = await getConnection();
+            const response = await conn.sendMessagePromise({
+                type: LIST_COMMAND,
+                limit,
+            });
+            renderEvents(response.events || []);
+        } catch (error) {
+            console.error(error);
+            alert('Failed to load events');
+        }
+    }
+
+    async function ensureSubscription(limit) {
+        const conn = await getConnection();
+        if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
+        }
+        unsubscribe = await conn.subscribeMessage((message) => {
+            renderEvents(message.events || []);
+        }, {
+            type: SUBSCRIBE_COMMAND,
+            limit,
+        });
+    }
+
+    async function loadEvents() {
+        const limitInput = document.getElementById('limit');
+        const limit = clampLimit(parseInt(limitInput.value, 10));
+        limitInput.value = limit;
+        await requestSnapshot(limit);
+        await ensureSubscription(limit);
+    }
+
     window.onload = loadEvents;
+    window.addEventListener('beforeunload', () => {
+        if (unsubscribe) {
+            unsubscribe();
+            unsubscribe = null;
+        }
+    });
     </script>
 </body>
 </html>
 """
 
-_PANEL_HTML = _PANEL_HTML_TEMPLATE.replace("__EVENTS_API_PATH__", EVENTS_API_PATH)
-
-
-def clamp_limit(raw_limit: str | None) -> int:
-    try:
-        parsed = int(raw_limit) if raw_limit is not None else DEFAULT_EVENT_LIMIT
-    except (TypeError, ValueError):
-        return DEFAULT_EVENT_LIMIT
-    return max(1, min(MAX_EVENT_LIMIT, parsed))
-
-
-class IntentEventsView(HomeAssistantView):
-    url = EVENTS_API_PATH
-    name = "api:assist_intent_logger:events"
-    requires_auth = True
-
-    async def get(self, request):  # type: ignore[override]
-        hass: HomeAssistant = request.app["hass"]
-        limit = clamp_limit(request.query.get("limit"))
-        events = await hass.async_add_executor_job(fetch_recent_events, hass, limit)
-        payload = IntentEventListResponse(events=events)
-        return self.json(payload.model_dump(mode="json"))
+_PANEL_HTML = (
+    _PANEL_HTML_TEMPLATE
+    .replace("__DEFAULT_LIMIT__", str(DEFAULT_EVENT_LIMIT))
+    .replace("__MAX_LIMIT__", str(MAX_EVENT_LIMIT))
+    .replace("__WS_LIST_CMD__", WS_CMD_LIST_EVENTS)
+    .replace("__WS_SUB_CMD__", WS_CMD_SUBSCRIBE_EVENTS)
+)
 
 
 class IntentPanelView(HomeAssistantView):

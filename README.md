@@ -5,7 +5,7 @@ A Home Assistant custom component that records Assist Pipeline intent events and
 ## Features
 - Captures `INTENT_START` and `INTENT_END` events from every Assist pipeline run.
 - Stores raw pipeline payloads inside a local SQLite database (`intentsity.db`).
-- Exposes a custom API endpoint at `/api/intentsity/events` for tooling.
+- Provides websocket commands (`intentsity/events/list` and `intentsity/events/subscribe`) for tooling and live dashboards.
 - Registers an iframe-based sidebar panel (`Assist Intent Review`) that visualizes the latest events.
 
 ## Installation
@@ -16,7 +16,9 @@ A Home Assistant custom component that records Assist Pipeline intent events and
 
 ## Usage
 - Use the sidebar panel to filter the latest 100 entries (adjustable up to 500) and inspect their payloads.
-- Automations or external tools can query the `/api/intentsity/events?limit=200` endpoint (authenticated) to download datasets.
+- Automations or external tools can call the authenticated websocket commands:
+	- `intentsity/events/list` with an optional `limit` (1-500) to fetch a snapshot.
+	- `intentsity/events/subscribe` to receive pushes whenever new events are recorded (limit respected per subscriber).
 
 ## Development Notes
 - Intent payloads are normalized with Pydantic (`models.py`), and all blocking DB calls run inside executor jobs.

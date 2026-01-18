@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import inspect
 from dataclasses import asdict
-from typing import Callable
+from typing import Awaitable, Callable
 
 import logging
 
@@ -12,18 +13,20 @@ from homeassistant.components.assist_pipeline.pipeline import (
 )
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from . import db, view
-from .const import DOMAIN
+from . import db, view, websocket
+from .const import DOMAIN, SIGNAL_EVENT_RECORDED
 from .models import LoggedIntentEvent
 
 _LOGGER = logging.getLogger(__name__)
 
 
-_ORIGINAL_PROCESS_EVENT: (
-    Callable[[PipelineRun, PipelineEvent], None] | None
-) = None
+OriginalProcessEvent = Callable[[PipelineRun, PipelineEvent], Awaitable[None] | None]
+
+
+_ORIGINAL_PROCESS_EVENT: OriginalProcessEvent | None = None
 
 DATA_DB_INITIALIZED = "db_initialized"
 DATA_API_REGISTERED = "api_registered"
@@ -31,6 +34,15 @@ LOGGABLE_EVENTS = {
     PipelineEventType.INTENT_START,
     PipelineEventType.INTENT_END,
 }
+
+
+def _resolve_run_id(run: PipelineRun) -> str:
+    """Return a stable identifier for a pipeline run."""
+
+    run_id = getattr(run, "id", None) or getattr(run, "run_id", None)
+    if run_id is None:
+        return "unknown"
+    return str(run_id)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -60,7 +72,7 @@ async def _async_initialize(hass: HomeAssistant) -> None:
     _ensure_pipeline_patched(hass)
 
     if not domain_data.get(DATA_API_REGISTERED):
-        hass.http.register_view(view.IntentEventsView())
+        websocket.async_register_commands(hass)
         hass.http.register_view(view.IntentPanelView())
         async_register_built_in_panel(
             hass,
@@ -97,19 +109,20 @@ def _restore_pipeline_patch() -> None:
     _ORIGINAL_PROCESS_EVENT = None
 
 
-@callback
-def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
+async def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
     hass: HomeAssistant = self.hass
 
     if event.type in LOGGABLE_EVENTS:
         payload = LoggedIntentEvent(
-            run_id=self.id,
+            run_id=_resolve_run_id(self),
             event_type=event.type.value,
             intent_type=getattr(event.data, "intent_type", None),
             raw_event=asdict(event),
         )
+
         try:
-            hass.async_add_executor_job(db.insert_event, hass, payload)
+            await hass.async_add_executor_job(db.insert_event, hass, payload)
+            async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED, payload)
         except Exception as err:  # pragma: no cover - defensive logging
             _LOGGER.warning(
                 "[intentsity] Failed to record intent event: %s",
@@ -117,4 +130,6 @@ def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> None:
             )
 
     if _ORIGINAL_PROCESS_EVENT is not None:
-        _ORIGINAL_PROCESS_EVENT(self, event)
+        result = _ORIGINAL_PROCESS_EVENT(self, event)
+        if inspect.isawaitable(result):
+            await result

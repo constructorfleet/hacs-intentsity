@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Coroutine
 
 
 class _Config:
@@ -44,3 +44,11 @@ class HomeAssistant:
     ) -> Any:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(None, func, *args)
+
+    def async_create_task(self, coro: Coroutine[Any, Any, Any]) -> asyncio.Task:
+        loop = asyncio.get_running_loop()
+        return loop.create_task(coro)
+
+
+def callback(func: Callable[..., Any]) -> Callable[..., Any]:
+    return func
