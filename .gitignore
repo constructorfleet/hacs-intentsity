@@ -18,3 +18,16 @@ uv.lock
 
 # Virtual environments
 .venv
+
+# Home-Assitatnt
+home-assistant.log*
+blueprints/
+.storage/
+tts/
+deps/
+.HA_VERSION
+
+# Node
+node_modules/
+
+intentsity.db
