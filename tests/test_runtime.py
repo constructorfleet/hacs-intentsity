@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
+from dataclasses import asdict
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -28,6 +30,17 @@ def _setup_fresh_db(hass: HomeAssistant) -> Path:
     return db_path
 
 
+def _make_pipeline_run(hass: HomeAssistant, run_id: str) -> Any:
+    return SimpleNamespace(hass=hass, id=run_id, run_id=run_id)
+
+
+def _event_intent_type(event: PipelineEvent) -> str | None:
+    data = event.data
+    if isinstance(data, Mapping):
+        return data.get("intent_type")
+    return getattr(data, "intent_type", None)
+
+
 async def _wait_for(condition: Callable[[], bool], timeout: float = 0.5) -> None:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -39,20 +52,17 @@ async def _wait_for(condition: Callable[[], bool], timeout: float = 0.5) -> None
 
 def test_query_recent_events_respects_limit(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    run = cast(Any, PipelineRun(hass, "run-multi"))  # type: ignore[call-arg]
+    run = _make_pipeline_run(hass, "run-multi")
 
     for idx in range(3):
-        event = cast(
-            Any,
-            PipelineEvent(
-                PipelineEventType.INTENT_START,
-                {"intent_type": f"Intent{idx}"},
-            ),
+        event = PipelineEvent(
+            PipelineEventType.INTENT_START,
+            {"intent_type": f"Intent{idx}"},
         )
         payload = LoggedIntentEvent(
             run_id=run.run_id,
             event_type=event.type.value,
-            intent_type=getattr(event.data, "intent_type", None),
+            intent_type=_event_intent_type(event),
             raw_event=asdict(event),
         )
         db.insert_event(hass, payload)
@@ -74,20 +84,14 @@ async def test_patched_process_event_persists_intents(hass: HomeAssistant) -> No
 
     intentsity._ORIGINAL_PROCESS_EVENT = original  # type: ignore[assignment]
 
-    run = cast(Any, PipelineRun(hass, "run-123"))  # type: ignore[call-arg]
-    start_event = cast(
-        Any,
-        PipelineEvent(
+    run = _make_pipeline_run(hass, "run-123")
+    start_event = PipelineEvent(
         PipelineEventType.INTENT_START,
         {"intent_type": "AssistMedia"},
-        ),
     )
-    end_event = cast(
-        Any,
-        PipelineEvent(
+    end_event = PipelineEvent(
         PipelineEventType.INTENT_END,
         {"intent_type": "AssistMedia"},
-        ),
     )
 
     try:
@@ -138,18 +142,15 @@ class _WsConnectionStub:
 @pytest.mark.asyncio
 async def test_websocket_list_events_returns_payload(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    run = cast(Any, PipelineRun(hass, "run-ws-list"))  # type: ignore[call-arg]
-    event = cast(
-        Any,
-        PipelineEvent(
+    run = _make_pipeline_run(hass, "run-ws-list")
+    event = PipelineEvent(
         PipelineEventType.INTENT_START,
         {"intent_type": "AssistList"},
-        ),
     )
     payload = LoggedIntentEvent(
         run_id=run.run_id,
         event_type=event.type.value,
-        intent_type=getattr(event.data, "intent_type", None),
+        intent_type=_event_intent_type(event),
         raw_event=asdict(event),
     )
     db.insert_event(hass, payload)
@@ -180,27 +181,31 @@ async def test_websocket_subscribe_streams_updates(hass: HomeAssistant) -> None:
     await _wait_for(lambda: bool(connection.sent_results))
     assert connection.sent_results[0]["result"] is None
 
-    run = cast(Any, PipelineRun(hass, "run-ws-sub"))  # type: ignore[call-arg]
-    event = cast(
-        Any,
-        PipelineEvent(
+    run = _make_pipeline_run(hass, "run-ws-sub")
+    event = PipelineEvent(
         PipelineEventType.INTENT_START,
         {"intent_type": "AssistLive"},
-        ),
     )
     payload = LoggedIntentEvent(
         run_id=run.run_id,
         event_type=event.type.value,
-        intent_type=getattr(event.data, "intent_type", None),
+        intent_type=_event_intent_type(event),
         raw_event=asdict(event),
     )
     db.insert_event(hass, payload)
     async_dispatcher_send(hass, const.SIGNAL_EVENT_RECORDED, payload)
 
-    await _wait_for(lambda: bool(connection.sent_events))
+    await _wait_for(
+        lambda: any(msg["event"]["events"] for msg in connection.sent_events)
+    )
 
-    assert connection.sent_events
-    assert connection.sent_events[-1]["event"]["events"][0]["intent_type"] == "AssistLive"
+    for message in reversed(connection.sent_events):
+        events = message.get("event", {}).get("events", [])
+        if events:
+            assert events[0]["intent_type"] == "AssistLive"
+            break
+    else:  # pragma: no cover - defensive guard
+        pytest.fail("No websocket events contained intent payloads")
 
 
 @pytest.mark.asyncio

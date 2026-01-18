@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from collections.abc import Mapping
 from dataclasses import asdict
 from typing import Awaitable, Callable
 
@@ -43,6 +44,13 @@ def _resolve_run_id(run: PipelineRun) -> str:
     if run_id is None:
         return "unknown"
     return str(run_id)
+
+
+def _extract_intent_type(event: PipelineEvent) -> str | None:
+    data = event.data
+    if isinstance(data, Mapping):
+        return data.get("intent_type")
+    return getattr(data, "intent_type", None)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -116,7 +124,7 @@ async def _patched_process_event(self: PipelineRun, event: PipelineEvent) -> Non
         payload = LoggedIntentEvent(
             run_id=_resolve_run_id(self),
             event_type=event.type.value,
-            intent_type=getattr(event.data, "intent_type", None),
+            intent_type=_extract_intent_type(event),
             raw_event=asdict(event),
         )
 

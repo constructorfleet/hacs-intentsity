@@ -13,5 +13,4 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-norecursedirs = ["tests/stubs"]
 addopts = "--strict-markers"
