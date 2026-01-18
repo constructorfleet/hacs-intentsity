@@ -23,14 +23,14 @@ This repository ships a Home Assistant custom component that records Assist Pipe
 6. **Review Dependencies** – mirror new Python requirements in both `pyproject.toml` and `manifest.json` before release.
 7. **Panel Assets** – keep the iframe HTML and associated assets in sync with API changes; never inline large HTML blobs inside Python.
 
-## Quality Bar & Checks
+## Quality Bar & Checks (IMPORTANT!)
 - Keep logs actionable and avoid noisy tracebacks.
 - Respect ASCII-only code unless a file already mandates Unicode.
 - Prefer descriptive comments sparingly, only for complex code paths.
 - Confirm the custom panel loads in both desktop and mobile breakpoints.
 - When altering the DB schema, include migration notes and bump the manifest version.
 - Enforce at least 90% pytest coverage on every change; add or update tests until the threshold is met.
-- Commit each completed unit of work immediately using conventional commit messages (e.g., `feat(runtime): add pipeline patch`).
+- *ALWAYS* Commit each completed unit of work immediately using conventional commit messages (e.g., `feat(runtime): add pipeline patch`).
 - Run `uv run pytest --cov=custom_components/intentsity --cov=tests` before opening a PR and paste the summary into the review notes.
 - For behavioral changes, capture screenshots/GIFs of the panel showing the new UX and attach them to the PR.
 
