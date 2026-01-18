@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Mapping
-from dataclasses import asdict
-from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, cast
@@ -12,7 +10,7 @@ import pytest
 
 from custom_components import intentsity
 from custom_components.intentsity import const, db, view, websocket
-from custom_components.intentsity.models import LoggedIntentEvent
+from custom_components.intentsity.models import IntentStartRecord
 from homeassistant.components.assist_pipeline.pipeline import (
     PipelineEvent,
     PipelineEventType,
@@ -34,13 +32,6 @@ def _make_pipeline_run(hass: HomeAssistant, run_id: str) -> Any:
     return SimpleNamespace(hass=hass, id=run_id, run_id=run_id)
 
 
-def _event_intent_type(event: PipelineEvent) -> str | None:
-    data = event.data
-    if isinstance(data, Mapping):
-        return data.get("intent_type")
-    return getattr(data, "intent_type", None)
-
-
 async def _wait_for(condition: Callable[[], bool], timeout: float = 0.5) -> None:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
@@ -50,27 +41,32 @@ async def _wait_for(condition: Callable[[], bool], timeout: float = 0.5) -> None
         await asyncio.sleep(0)
 
 
-def test_query_recent_events_respects_limit(hass: HomeAssistant) -> None:
+def test_query_recent_runs_respects_limit(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    run = _make_pipeline_run(hass, "run-multi")
+    now = datetime.now(timezone.utc)
 
     for idx in range(3):
-        event = PipelineEvent(
-            PipelineEventType.INTENT_START,
-            {"intent_type": f"Intent{idx}"},
+        run_id = f"run-{idx}"
+        db.upsert_pipeline_run(
+            hass,
+            run_id,
+            {
+                "created_at": now + timedelta(seconds=idx),
+                "name": f"Run {idx}",
+            },
         )
-        payload = LoggedIntentEvent(
-            run_id=run.run_id,
-            event_type=event.type.value,
-            intent_type=_event_intent_type(event),
-            raw_event=asdict(event),
+        db.insert_intent_start(
+            hass,
+            IntentStartRecord(
+                run_id=run_id,
+                intent_input=f"Turn on lights {idx}",
+            ),
         )
-        db.insert_event(hass, payload)
 
-    events = db.fetch_recent_events(hass, 2)
-    assert len(events) == 2
-    assert events[0].intent_type == "Intent2"
-    assert events[1].intent_type == "Intent1"
+    response = db.fetch_recent_runs(hass, 2)
+    assert len(response.runs) == 2
+    assert response.runs[0].run_id == "run-2"
+    assert response.runs[1].run_id == "run-1"
 
 
 @pytest.mark.asyncio
@@ -87,30 +83,33 @@ async def test_patched_process_event_persists_intents(hass: HomeAssistant) -> No
     run = _make_pipeline_run(hass, "run-123")
     start_event = PipelineEvent(
         PipelineEventType.INTENT_START,
-        {"intent_type": "AssistMedia"},
+        {"intent_type": "AssistMedia", "intent_input": "AssistMedia"},
+    )
+    progress_event = PipelineEvent(
+        PipelineEventType.INTENT_PROGRESS,
+        {"chat_log_delta": {"role": "assistant", "content": "Working"}},
     )
     end_event = PipelineEvent(
         PipelineEventType.INTENT_END,
-        {"intent_type": "AssistMedia"},
+        {"processed_locally": False, "intent_output": {"speech": "Done"}},
     )
 
     try:
         await intentsity._patched_process_event(run, start_event)
+        await intentsity._patched_process_event(run, progress_event)
         await intentsity._patched_process_event(run, end_event)
     finally:
         intentsity._ORIGINAL_PROCESS_EVENT = None
 
-    events = await hass.async_add_executor_job(db.fetch_recent_events, hass, 10)
-    assert [event.event_type for event in events] == [
-        PipelineEventType.INTENT_END.value,
-        PipelineEventType.INTENT_START.value,
-    ]
-    end_payload = events[0].raw_event
-    assert "intent_end" in end_payload
-    assert "intent_start" in end_payload
-    assert end_payload["intent_start"]["data"]["intent_type"] == "AssistMedia"
+    response = await hass.async_add_executor_job(db.fetch_recent_runs, hass, 5)
+    assert response.runs
+    run_record = response.runs[0]
+    assert run_record.intent_starts and run_record.intent_starts[0].intent_input == "AssistMedia"
+    assert run_record.intent_progress and run_record.intent_progress[0].chat_log_delta["content"] == "Working"
+    assert run_record.intent_ends and run_record.intent_ends[0].intent_output["speech"] == "Done"
     assert recorded == [
         PipelineEventType.INTENT_START.value,
+        PipelineEventType.INTENT_PROGRESS.value,
         PipelineEventType.INTENT_END.value,
     ]
 
@@ -123,6 +122,7 @@ async def test_intent_panel_view_returns_html(hass: HomeAssistant) -> None:
     assert response.content_type == "text/html"
     assert response.text is not None
     assert "Assist Intent Review" in response.text
+    assert "Normalized Assist pipeline runs" in response.text
     assert "intentsity/events/list" in response.text
     assert "intentsity/events/subscribe" in response.text
 
@@ -147,17 +147,12 @@ class _WsConnectionStub:
 async def test_websocket_list_events_returns_payload(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
     run = _make_pipeline_run(hass, "run-ws-list")
-    event = PipelineEvent(
-        PipelineEventType.INTENT_START,
-        {"intent_type": "AssistList"},
+    db.upsert_pipeline_run(
+        hass,
+        run.run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "WS Run"},
     )
-    payload = LoggedIntentEvent(
-        run_id=run.run_id,
-        event_type=event.type.value,
-        intent_type=_event_intent_type(event),
-        raw_event=asdict(event),
-    )
-    db.insert_event(hass, payload)
+    db.insert_intent_start(hass, IntentStartRecord(run_id=run.run_id, intent_input="AssistList"))
 
     connection = _WsConnectionStub()
     websocket.websocket_list_events(
@@ -168,7 +163,7 @@ async def test_websocket_list_events_returns_payload(hass: HomeAssistant) -> Non
 
     await _wait_for(lambda: bool(connection.sent_results))
 
-    assert connection.sent_results[0]["result"]["events"][0]["run_id"] == "run-ws-list"
+    assert connection.sent_results[0]["result"]["runs"][0]["run_id"] == "run-ws-list"
 
 
 @pytest.mark.asyncio
@@ -186,27 +181,22 @@ async def test_websocket_subscribe_streams_updates(hass: HomeAssistant) -> None:
     assert connection.sent_results[0]["result"] is None
 
     run = _make_pipeline_run(hass, "run-ws-sub")
-    event = PipelineEvent(
-        PipelineEventType.INTENT_START,
-        {"intent_type": "AssistLive"},
+    db.upsert_pipeline_run(
+        hass,
+        run.run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "Live"},
     )
-    payload = LoggedIntentEvent(
-        run_id=run.run_id,
-        event_type=event.type.value,
-        intent_type=_event_intent_type(event),
-        raw_event=asdict(event),
-    )
-    db.insert_event(hass, payload)
-    async_dispatcher_send(hass, const.SIGNAL_EVENT_RECORDED, payload)
+    db.insert_intent_start(hass, IntentStartRecord(run_id=run.run_id, intent_input="AssistLive"))
+    async_dispatcher_send(hass, const.SIGNAL_EVENT_RECORDED, run.run_id)
 
     await _wait_for(
-        lambda: any(msg["event"]["events"] for msg in connection.sent_events)
+        lambda: any(msg["event"].get("runs") for msg in connection.sent_events)
     )
 
     for message in reversed(connection.sent_events):
-        events = message.get("event", {}).get("events", [])
-        if events:
-            assert events[0]["intent_type"] == "AssistLive"
+        runs = message.get("event", {}).get("runs", [])
+        if runs:
+            assert runs[0]["run_id"] == "run-ws-sub"
             break
     else:  # pragma: no cover - defensive guard
         pytest.fail("No websocket events contained intent payloads")

@@ -2,76 +2,109 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
-class IntentEventRecord(BaseModel):
-    """Normalized representation of an intent pipeline event."""
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
+
+def _ensure_dict(raw: str | dict[str, Any] | None) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {"raw": raw}
+    return {}
+
+
+class IntentStartRecord(BaseModel):
     run_id: str
-    timestamp: datetime
-    event_type: str
-    intent_type: str | None = Field(default=None)
-    raw_event: dict[str, Any] = Field(default_factory=dict)
+    timestamp: datetime = Field(default_factory=_utcnow)
+    engine: str | None = None
+    language: str | None = None
+    intent_input: str | None = None
+    conversation_id: str | None = None
+    device_id: str | None = None
+    satellite_id: str | None = None
+    prefer_local_intents: bool | None = None
 
 
-class LoggedIntentEvent(IntentEventRecord):
-    """Intent event ready to be persisted."""
+class IntentProgressRecord(BaseModel):
+    run_id: str
+    timestamp: datetime = Field(default_factory=_utcnow)
+    chat_log_delta: dict[str, Any] | None = None
+    tts_start_streaming: bool | None = None
 
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-
-    def to_db_row(self) -> tuple[str, str, str, str | None, str]:
-        return (
-            self.run_id,
-            self.timestamp.isoformat(),
-            self.event_type,
-            self.intent_type,
-            json.dumps(self.raw_event, default=str),
+    @classmethod
+    def from_payload(
+        cls,
+        run_id: str,
+        timestamp: datetime,
+        payload: dict[str, Any] | None,
+    ) -> "IntentProgressRecord":
+        payload = payload or {}
+        delta = payload.get("chat_log_delta")
+        parsed_delta = _ensure_dict(delta) if isinstance(delta, (str, dict)) else None
+        return cls(
+            run_id=run_id,
+            timestamp=timestamp,
+            chat_log_delta=parsed_delta,
+            tts_start_streaming=payload.get("tts_start_streaming"),
         )
 
 
-class IntentEventListResponse(BaseModel):
-    """Wire format for API responses."""
+class IntentEndRecord(BaseModel):
+    run_id: str
+    timestamp: datetime = Field(default_factory=_utcnow)
+    processed_locally: bool | None = None
+    intent_output: dict[str, Any] = Field(default_factory=dict)
 
-    events: list[IntentEventRecord]
-
-
-def intent_event_from_row(row: Mapping[str, Any]) -> IntentEventRecord:
-    raw_event_payload = row.get("raw_event")
-
-    if isinstance(raw_event_payload, str):
-        try:
-            parsed = json.loads(raw_event_payload)
-        except json.JSONDecodeError:
-            parsed = {"raw": raw_event_payload}
-    elif isinstance(raw_event_payload, dict):
-        parsed = raw_event_payload
-    else:
-        parsed = {}
-
-    timestamp_str = row.get("timestamp")
-    timestamp = _parse_timestamp(timestamp_str) if isinstance(timestamp_str, str) else datetime.now(timezone.utc)
-
-    return IntentEventRecord.model_validate(
-        {
-            "run_id": row.get("run_id", "unknown"),
-            "timestamp": timestamp,
-            "event_type": row.get("event_type", "unknown"),
-            "intent_type": row.get("intent_type"),
-            "raw_event": parsed,
-        }
-    )
+    @classmethod
+    def from_payload(
+        cls,
+        run_id: str,
+        timestamp: datetime,
+        payload: str | dict[str, Any] | None,
+    ) -> "IntentEndRecord":
+        parsed = _ensure_dict(payload)
+        return cls(
+            run_id=run_id,
+            timestamp=timestamp,
+            processed_locally=parsed.get("processed_locally"),
+            intent_output=parsed.get("intent_output") or parsed,
+        )
 
 
-def _parse_timestamp(value: str) -> datetime:
-    try:
-        return datetime.fromisoformat(value)
-    except ValueError:
-        return datetime.now(timezone.utc)
+class PipelineRunRecord(BaseModel):
+    run_id: str
+    created_at: datetime
+    conversation_engine: str | None = None
+    language: str | None = None
+    name: str | None = None
+    stt_engine: str | None = None
+    stt_language: str | None = None
+    tts_engine: str | None = None
+    tts_language: str | None = None
+    tts_voice: str | None = None
+    wake_word_entity: str | None = None
+    wake_word_id: str | None = None
+    prefer_local_intents: bool | None = None
+    intent_starts: list[IntentStartRecord] = Field(default_factory=list)
+    intent_progress: list[IntentProgressRecord] = Field(default_factory=list)
+    intent_ends: list[IntentEndRecord] = Field(default_factory=list)
 
 
-IntentEventRecord.model_rebuild()
-LoggedIntentEvent.model_rebuild()
-IntentEventListResponse.model_rebuild()
+class IntentRunListResponse(BaseModel):
+    runs: list[PipelineRunRecord]
+
+
+IntentStartRecord.model_rebuild()
+IntentProgressRecord.model_rebuild()
+IntentEndRecord.model_rebuild()
+PipelineRunRecord.model_rebuild()
+IntentRunListResponse.model_rebuild()

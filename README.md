@@ -3,10 +3,10 @@
 A Home Assistant custom component that records Assist Pipeline intent events and surfaces them for dataset review.
 
 ## Features
-- Captures `INTENT_START` and `INTENT_END` events from every Assist pipeline run.
-- Stores raw pipeline payloads inside a local SQLite database (`intentsity.db`).
-- Provides websocket commands (`intentsity/events/list` and `intentsity/events/subscribe`) for tooling and live dashboards.
-- Registers an iframe-based sidebar panel (`Assist Intent Review`) that visualizes the latest events.
+- Captures `INTENT_START`, `INTENT_PROGRESS`, and `INTENT_END` events from every Assist pipeline run.
+- Normalizes pipeline metadata, start/end payloads, and progress deltas (chat log + `tts_start_streaming`) into a relational SQLite database (`pipeline_runs`, `intent_starts`, `intent_progress`, `intent_ends`).
+- Provides websocket commands (`intentsity/events/list` and `intentsity/events/subscribe`) that stream the latest pipeline runs with nested sections for downstream tooling.
+- Registers an iframe-based sidebar panel (`Assist Intent Review`) that renders run cards with metadata plus start/progress/end sections.
 
 ## Installation
 1. Copy the `custom_components/intentsity` folder into your Home Assistant `config/custom_components` directory.
@@ -21,6 +21,6 @@ A Home Assistant custom component that records Assist Pipeline intent events and
 	- `intentsity/events/subscribe` to receive pushes whenever new events are recorded (limit respected per subscriber).
 
 ## Development Notes
-- Intent payloads are normalized with Pydantic (`models.py`), and all blocking DB calls run inside executor jobs.
-- Persistence is powered by SQLAlchemy's ORM (see `IntentEventRow` inside `__init__.py`); update the model definition and bump the manifest version if the schema changes.
+- Pipeline runs and related intent payloads are modeled with Pydantic (`models.py`), and all blocking DB calls run inside executor jobs.
+- Persistence is powered by SQLAlchemy's ORM (see `custom_components/intentsity/db.py` for table layouts); update both schema and documentation when columns change.
 - Run the unit suite via `pytest tests` before submitting changes.

@@ -22,38 +22,128 @@ _PANEL_HTML_TEMPLATE = """
     <meta charset=\"UTF-8\" />
     <title>Intentsity Intent Review</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 24px; background: #f4f6f8; }
-        h1 { margin-bottom: 8px; }
-        .controls { margin-bottom: 16px; }
-        label { margin-right: 8px; }
-        table { width: 100%; border-collapse: collapse; background: #fff; }
-        th, td { padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: left; }
-        th { background: #fafafa; }
-        tr:hover { background: #f1f9ff; }
-        pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
-        button { padding: 6px 12px; }
+        :root {
+            --bg-gradient: radial-gradient(circle at top, #121531, #05060d 55%);
+            --card-bg: rgba(10, 13, 25, 0.9);
+            --accent: #7dd4ff;
+            --text-muted: #a9b6cf;
+            --border: rgba(125, 212, 255, 0.25);
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 32px;
+            min-height: 100vh;
+            color: #f5fbff;
+            background: var(--bg-gradient);
+        }
+        h1 { margin: 0 0 12px; font-size: 28px; letter-spacing: 0.02em; }
+        p { margin: 0 0 24px; color: var(--text-muted); }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        label { font-weight: 600; }
+        input {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 6px;
+            width: 120px;
+        }
+        button {
+            padding: 8px 18px;
+            border-radius: 999px;
+            border: none;
+            background: var(--accent);
+            color: #001628;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        button:hover { transform: translateY(-1px); box-shadow: 0 10px 25px rgba(125, 212, 255, 0.4); }
+        #run-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 18px;
+        }
+        .run-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 25px 45px rgba(2, 6, 18, 0.65);
+            animation: fadeIn 0.35s ease;
+        }
+        .run-header { display: flex; flex-direction: column; gap: 6px; }
+        .run-header h2 { margin: 0; font-size: 18px; }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(125, 212, 255, 0.12);
+            color: var(--accent);
+            font-size: 12px;
+            letter-spacing: 0.03em;
+        }
+        .section {
+            border-top: 1px solid var(--border);
+            padding-top: 10px;
+        }
+        .section h3 {
+            margin: 0 0 6px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+        .entry {
+            margin: 0 0 8px;
+            padding: 8px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .entry:last-child { margin-bottom: 0; }
+        .entry time { font-size: 12px; color: var(--text-muted); display: block; margin-bottom: 4px; }
+        pre {
+            margin: 6px 0 0;
+            padding: 8px;
+            background: rgba(0, 0, 0, 0.35);
+            border-radius: 8px;
+            max-height: 220px;
+            overflow: auto;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @media (max-width: 600px) {
+            body { padding: 20px; }
+            .controls { flex-direction: column; align-items: flex-start; }
+            input { width: 100%; }
+        }
     </style>
 </head>
 <body>
     <h1>Assist Intent Review</h1>
-    <p>Inspect captured Assist intents for dataset curation.</p>
+    <p>Normalized Assist pipeline runs with linked START, PROGRESS, and END payloads.</p>
     <div class=\"controls\">
         <label for=\"limit\">Rows:</label>
         <input id=\"limit\" type=\"number\" min=\"1\" max=\"500\" value=\"100\" />
-        <button type=\"button\" onclick=\"loadEvents()\">Refresh</button>
+        <button type=\"button\" onclick=\"loadRuns()\">Refresh</button>
     </div>
-    <table>
-        <thead>
-            <tr>
-                <th>Timestamp</th>
-                <th>Run ID</th>
-                <th>Type</th>
-                <th>Intent</th>
-                <th>Payload</th>
-            </tr>
-        </thead>
-        <tbody id=\"intent-table\"></tbody>
-    </table>
+    <section id=\"run-list\"></section>
     <script>
     const DEFAULT_LIMIT = __DEFAULT_LIMIT__;
     const MAX_LIMIT = __MAX_LIMIT__;
@@ -74,19 +164,48 @@ _PANEL_HTML_TEMPLATE = """
         return conn;
     }
 
-    function renderEvents(events) {
-        const tbody = document.getElementById('intent-table');
-        tbody.innerHTML = '';
-        events.forEach(event => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${new Date(event.timestamp).toLocaleString()}</td>
-                <td>${event.run_id}</td>
-                <td>${event.event_type}</td>
-                <td>${event.intent_type || ''}</td>
-                <td><pre>${JSON.stringify(event.raw_event, null, 2)}</pre></td>
+    function renderSection(title, items, formatter) {
+        if (!items || !items.length) {
+            return '';
+        }
+        const rows = items.map(item => `
+            <div class=\"entry\">
+                <time>${new Date(item.timestamp).toLocaleString()}</time>
+                ${formatter(item)}
+            </div>
+        `).join('');
+        return `<div class=\"section\"><h3>${title}</h3>${rows}</div>`;
+    }
+
+    function renderRunsPayload(runs) {
+        const container = document.getElementById('run-list');
+        container.innerHTML = '';
+        runs.forEach(run => {
+            const card = document.createElement('article');
+            card.className = 'run-card';
+            const header = `
+                <div class=\"run-header\">
+                    <h2>${run.name || 'Assist Run'}</h2>
+                    <span class=\"pill\">${run.run_id.slice(0, 8)} · ${new Date(run.created_at).toLocaleString()}</span>
+                    <span class=\"pill\">${run.conversation_engine || 'engine'} · ${run.language || 'lang'}</span>
+                </div>
             `;
-            tbody.appendChild(row);
+            const starts = renderSection('Intent Starts', run.intent_starts || [], start => `
+                <strong>${start.intent_input || 'No transcript yet'}</strong>
+                <div>Engine: ${start.engine || 'n/a'}</div>
+                <div>Conversation: ${start.conversation_id || 'n/a'}</div>
+                ${start.device_id ? `<div>Device: ${start.device_id}</div>` : ''}
+            `);
+            const progress = renderSection('Intent Progress', run.intent_progress || [], prog => `
+                ${prog.chat_log_delta ? `<div>Chat Delta:<pre>${JSON.stringify(prog.chat_log_delta, null, 2)}</pre></div>` : ''}
+                ${typeof prog.tts_start_streaming !== 'undefined' && prog.tts_start_streaming !== null ? `<div>TTS Streaming: ${prog.tts_start_streaming}</div>` : ''}
+            `);
+            const ends = renderSection('Intent Ends', run.intent_ends || [], end => `
+                <div>Processed locally: ${end.processed_locally ?? 'n/a'}</div>
+                <div>Intent Output:<pre>${JSON.stringify(end.intent_output || {}, null, 2)}</pre></div>
+            `);
+            card.innerHTML = header + starts + progress + ends;
+            container.appendChild(card);
         });
     }
 
@@ -97,10 +216,10 @@ _PANEL_HTML_TEMPLATE = """
                 type: LIST_COMMAND,
                 limit,
             });
-            renderEvents(response.events || []);
+            renderRunsPayload(response.runs || []);
         } catch (error) {
             console.error(error);
-            alert('Failed to load events');
+            alert('Failed to load runs');
         }
     }
 
@@ -111,14 +230,15 @@ _PANEL_HTML_TEMPLATE = """
             unsubscribe = null;
         }
         unsubscribe = await conn.subscribeMessage((message) => {
-            renderEvents(message.events || []);
+            const payload = message.event?.runs || message.runs || [];
+            renderRunsPayload(payload);
         }, {
             type: SUBSCRIBE_COMMAND,
             limit,
         });
     }
 
-    async function loadEvents() {
+    async function loadRuns() {
         const limitInput = document.getElementById('limit');
         const limit = clampLimit(parseInt(limitInput.value, 10));
         limitInput.value = limit;
@@ -126,7 +246,7 @@ _PANEL_HTML_TEMPLATE = """
         await ensureSubscription(limit);
     }
 
-    window.onload = loadEvents;
+    window.onload = loadRuns;
     window.addEventListener('beforeunload', () => {
         if (unsubscribe) {
             unsubscribe();

@@ -1,55 +1,37 @@
 from __future__ import annotations
 
-import json
+from datetime import datetime, timezone
 
 from custom_components.intentsity import models
 
 
-def test_logged_event_round_trip() -> None:
-    payload = models.LoggedIntentEvent(
-        run_id="abc123",
-        event_type="intent_start",
-        intent_type="AssistIntentTest",
-        raw_event={"foo": "bar", "confidence": 0.7},
+def test_intent_end_from_payload_handles_string_json() -> None:
+    timestamp = datetime.now(timezone.utc)
+    payload = {"processed_locally": True, "intent_output": {"speech": "hi"}}
+
+    record = models.IntentEndRecord.from_payload("run-1", timestamp, payload)
+
+    assert record.run_id == "run-1"
+    assert record.processed_locally is True
+    assert record.intent_output["speech"] == "hi"
+
+
+def test_intent_progress_from_payload_parses_delta() -> None:
+    timestamp = datetime.now(timezone.utc)
+    payload = {"chat_log_delta": {"role": "assistant", "content": "Hi"}, "tts_start_streaming": True}
+
+    record = models.IntentProgressRecord.from_payload("run-1", timestamp, payload)
+
+    assert record.chat_log_delta == {"role": "assistant", "content": "Hi"}
+    assert record.tts_start_streaming is True
+
+
+def test_pipeline_run_record_defaults_lists() -> None:
+    record = models.PipelineRunRecord(
+        run_id="r-1",
+        created_at=datetime.now(timezone.utc),
     )
 
-    run_id, timestamp, event_type, intent_type, raw_json = payload.to_db_row()
-
-    assert json.loads(raw_json) == payload.raw_event
-
-    reconstructed = models.intent_event_from_row(
-        {
-            "run_id": run_id,
-            "timestamp": timestamp,
-            "event_type": event_type,
-            "intent_type": intent_type,
-            "raw_event": raw_json,
-        }
-    )
-
-    assert reconstructed.run_id == payload.run_id
-    assert reconstructed.event_type == payload.event_type
-    assert reconstructed.intent_type == payload.intent_type
-    assert reconstructed.raw_event == payload.raw_event
-
-
-def test_intent_event_from_row_handles_invalid_payload() -> None:
-    event = models.intent_event_from_row(
-        {
-            "run_id": "broken",
-            "timestamp": "not-a-timestamp",
-            "event_type": "intent_end",
-            "intent_type": None,
-            "raw_event": "{not-json}",
-        }
-    )
-
-    assert event.run_id == "broken"
-    assert event.event_type == "intent_end"
-    assert event.raw_event == {"raw": "{not-json}"}
-
-
-def test_model_rebuild_calls_are_idempotent() -> None:
-    models.IntentEventRecord.model_rebuild()
-    models.LoggedIntentEvent.model_rebuild()
-    models.IntentEventListResponse.model_rebuild()
+    assert record.intent_starts == []
+    assert record.intent_progress == []
+    assert record.intent_ends == []

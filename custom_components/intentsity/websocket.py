@@ -14,8 +14,8 @@ from .const import (
     WS_CMD_LIST_EVENTS,
     WS_CMD_SUBSCRIBE_EVENTS,
 )
-from .db import fetch_recent_events
-from .models import IntentEventListResponse, IntentEventRecord
+from .db import fetch_recent_runs
+from .models import IntentRunListResponse
 
 _EVENT_LIMIT_SCHEMA = vol.All(
     vol.Coerce(int),
@@ -31,9 +31,10 @@ def async_register_commands(hass: HomeAssistant) -> None:
 
 
 async def _async_fetch_payload(hass: HomeAssistant, limit: int) -> dict:
-    events = await hass.async_add_executor_job(fetch_recent_events, hass, limit)
-    response = IntentEventListResponse(events=events)
-    return response.model_dump(mode="json")
+    runs = await hass.async_add_executor_job(fetch_recent_runs, hass, limit)
+    if isinstance(runs, IntentRunListResponse):
+        return runs.model_dump(mode="json")
+    return IntentRunListResponse(runs=runs).model_dump(mode="json")
 
 
 async def _async_send_result(
@@ -93,7 +94,7 @@ def websocket_subscribe_events(
         await _async_send_event(hass, connection, request_id, limit)
 
     @callback
-    def _handle_new_event(*_: IntentEventRecord) -> None:
+    def _handle_new_event(*_: object) -> None:
         hass.async_create_task(_push_snapshot())
 
     unsubscribe = async_dispatcher_connect(hass, SIGNAL_EVENT_RECORDED, _handle_new_event)
