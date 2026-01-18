@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.coverage
+.pytest_cache/
+
+# Editor and tool artifacts
+.DS_Store
+.idea/
+.vscode/
+
+# uv / virtualenv
+uv.lock
+
+# Virtual environments
+.venv
