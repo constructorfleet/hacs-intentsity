@@ -11,6 +11,7 @@ from .const import (
     DEFAULT_EVENT_LIMIT,
     MAX_EVENT_LIMIT,
     WS_CMD_LIST_EVENTS,
+    WS_CMD_SAVE_REVIEW,
     WS_CMD_SUBSCRIBE_EVENTS,
 )
 
@@ -26,6 +27,7 @@ def _load_panel_html() -> str:
         .replace("__MAX_LIMIT__", str(MAX_EVENT_LIMIT))
         .replace("__WS_LIST_CMD__", WS_CMD_LIST_EVENTS)
         .replace("__WS_SUB_CMD__", WS_CMD_SUBSCRIBE_EVENTS)
+        .replace("__WS_SAVE_REVIEW__", WS_CMD_SAVE_REVIEW)
     )
 
 

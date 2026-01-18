@@ -122,9 +122,10 @@ async def test_intent_panel_view_returns_html(hass: HomeAssistant) -> None:
     assert response.content_type == "text/html"
     assert response.text is not None
     assert "Assist Intent Review" in response.text
-    assert "Normalized Assist pipeline runs" in response.text
+    assert "Track Assist pipeline runs" in response.text
     assert "intentsity/events/list" in response.text
     assert "intentsity/events/subscribe" in response.text
+    assert "intentsity/review/save" in response.text
 
 
 class _WsConnectionStub:
@@ -132,6 +133,7 @@ class _WsConnectionStub:
         self.subscriptions: dict[int, Any] = {}
         self.sent_results: list[dict[str, Any]] = []
         self.sent_events: list[dict[str, Any]] = []
+        self.sent_errors: list[dict[str, Any]] = []
 
     def send_result(self, request_id: int, result: dict | None = None) -> None:
         self.sent_results.append({"id": request_id, "result": result})
@@ -141,6 +143,9 @@ class _WsConnectionStub:
             self.sent_events.append(message)
         else:
             self.sent_results.append(message)
+
+    def send_error(self, request_id: int, code: str, message: str) -> None:
+        self.sent_errors.append({"id": request_id, "code": code, "message": message})
 
 
 @pytest.mark.asyncio
@@ -200,6 +205,98 @@ async def test_websocket_subscribe_streams_updates(hass: HomeAssistant) -> None:
             break
     else:  # pragma: no cover - defensive guard
         pytest.fail("No websocket events contained intent payloads")
+
+
+@pytest.mark.asyncio
+async def test_websocket_save_review_persists_expectations(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    run_id = "run-review"
+    db.upsert_pipeline_run(
+        hass,
+        run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "Review Target"},
+    )
+    db.insert_intent_start(
+        hass,
+        IntentStartRecord(run_id=run_id, intent_input="Test review"),
+    )
+
+    start_record = db.fetch_recent_runs(hass, 1).runs[0].intent_starts[0]
+    assert start_record.id is not None
+
+    connection = _WsConnectionStub()
+    await websocket.websocket_save_review(
+        hass,
+        cast(Any, connection),
+        {
+            "id": 12,
+            "type": const.WS_CMD_SAVE_REVIEW,
+            "run_id": run_id,
+            "intent_start_id": start_record.id,
+            "matched_expectations": True,
+            "steps": [
+                {
+                    "order_index": 0,
+                    "kind": "progress",
+                    "chat_log_delta": {"role": "assistant", "content": "Working"},
+                    "tts_start_streaming": True,
+                },
+                {
+                    "order_index": 1,
+                    "kind": "end",
+                    "processed_locally": False,
+                    "intent_output": {"speech": "Done"},
+                },
+            ],
+        },
+    )
+
+    assert connection.sent_results[-1]["result"] == {"status": "saved"}
+
+    run_response = db.fetch_recent_runs(hass, 1).runs[0]
+    assert run_response.review is not None
+    assert run_response.review.intent_start_id == start_record.id
+    assert run_response.review.matched_expectations is True
+    assert len(run_response.review.expected_progress) == 1
+    assert run_response.review.expected_progress[0].chat_log_delta["content"] == "Working"
+    assert run_response.review.expected_end is not None
+    assert run_response.review.expected_end.intent_output["speech"] == "Done"
+
+
+@pytest.mark.asyncio
+async def test_websocket_save_review_validates_single_end(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    run_id = "run-review-invalid"
+    db.upsert_pipeline_run(
+        hass,
+        run_id,
+        {"created_at": datetime.now(timezone.utc), "name": "Invalid Review"},
+    )
+    db.insert_intent_start(
+        hass,
+        IntentStartRecord(run_id=run_id, intent_input="Test"),
+    )
+
+    start_record = db.fetch_recent_runs(hass, 1).runs[0].intent_starts[0]
+
+    connection = _WsConnectionStub()
+    await websocket.websocket_save_review(
+        hass,
+        cast(Any, connection),
+        {
+            "id": 99,
+            "type": const.WS_CMD_SAVE_REVIEW,
+            "run_id": run_id,
+            "intent_start_id": start_record.id,
+            "steps": [
+                {"order_index": 0, "kind": "end", "intent_output": {"speech": "First"}},
+                {"order_index": 1, "kind": "end", "intent_output": {"speech": "Second"}},
+            ],
+        },
+    )
+
+    assert connection.sent_errors
+    assert connection.sent_errors[-1]["code"] == "invalid_review"
 
 
 @pytest.mark.asyncio

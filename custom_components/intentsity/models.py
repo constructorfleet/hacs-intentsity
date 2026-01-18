@@ -24,6 +24,7 @@ def _ensure_dict(raw: str | dict[str, Any] | None) -> dict[str, Any]:
 
 class IntentStartRecord(BaseModel):
     run_id: str
+    id: int | None = None
     timestamp: datetime = Field(default_factory=_utcnow)
     engine: str | None = None
     language: str | None = None
@@ -36,6 +37,7 @@ class IntentStartRecord(BaseModel):
 
 class IntentProgressRecord(BaseModel):
     run_id: str
+    id: int | None = None
     timestamp: datetime = Field(default_factory=_utcnow)
     chat_log_delta: dict[str, Any] | None = None
     tts_start_streaming: bool | None = None
@@ -60,6 +62,7 @@ class IntentProgressRecord(BaseModel):
 
 class IntentEndRecord(BaseModel):
     run_id: str
+    id: int | None = None
     timestamp: datetime = Field(default_factory=_utcnow)
     processed_locally: bool | None = None
     intent_output: dict[str, Any] = Field(default_factory=dict)
@@ -97,6 +100,28 @@ class PipelineRunRecord(BaseModel):
     intent_starts: list[IntentStartRecord] = Field(default_factory=list)
     intent_progress: list[IntentProgressRecord] = Field(default_factory=list)
     intent_ends: list[IntentEndRecord] = Field(default_factory=list)
+    review: "IntentReviewRecord | None" = None
+
+
+class ExpectedIntentProgressRecord(BaseModel):
+    order_index: int
+    chat_log_delta: dict[str, Any] | None = None
+    tts_start_streaming: bool | None = None
+
+
+class ExpectedIntentEndRecord(BaseModel):
+    order_index: int
+    processed_locally: bool | None = None
+    intent_output: dict[str, Any] | None = None
+
+
+class IntentReviewRecord(BaseModel):
+    run_id: str
+    intent_start_id: int | None = None
+    matched_expectations: bool
+    updated_at: datetime
+    expected_progress: list[ExpectedIntentProgressRecord] = Field(default_factory=list)
+    expected_end: ExpectedIntentEndRecord | None = None
 
 
 class IntentRunListResponse(BaseModel):
@@ -108,3 +133,6 @@ IntentProgressRecord.model_rebuild()
 IntentEndRecord.model_rebuild()
 PipelineRunRecord.model_rebuild()
 IntentRunListResponse.model_rebuild()
+ExpectedIntentProgressRecord.model_rebuild()
+ExpectedIntentEndRecord.model_rebuild()
+IntentReviewRecord.model_rebuild()

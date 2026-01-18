@@ -21,8 +21,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, rela
 
 from .const import DB_NAME, DOMAIN
 from .models import (
+    ExpectedIntentEndRecord,
+    ExpectedIntentProgressRecord,
     IntentEndRecord,
     IntentProgressRecord,
+    IntentReviewRecord,
     IntentRunListResponse,
     IntentStartRecord,
     PipelineRunRecord,
@@ -60,16 +63,25 @@ class PipelineRunRow(_DBBase):
         back_populates="run",
         cascade="all, delete-orphan",
         lazy="selectin",
+        order_by="IntentStartRow.timestamp",
     )
     intent_progress: Mapped[list["IntentProgressRow"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         lazy="selectin",
+        order_by="IntentProgressRow.timestamp",
     )
     intent_ends: Mapped[list["IntentEndRow"]] = relationship(
         back_populates="run",
         cascade="all, delete-orphan",
         lazy="selectin",
+        order_by="IntentEndRow.timestamp",
+    )
+    review: Mapped["IntentReviewRow | None"] = relationship(
+        back_populates="run",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        uselist=False,
     )
 
 
@@ -112,6 +124,61 @@ class IntentEndRow(_DBBase):
     intent_output: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     run: Mapped[PipelineRunRow] = relationship(back_populates="intent_ends")
+
+
+class IntentReviewRow(_DBBase):
+    __tablename__ = "intent_reviews"
+
+    run_id: Mapped[str] = mapped_column(
+        ForeignKey("pipeline_runs.run_id", ondelete="CASCADE"), primary_key=True
+    )
+    intent_start_id: Mapped[int | None] = mapped_column(
+        ForeignKey("intent_starts.id", ondelete="SET NULL"), nullable=True
+    )
+    matched_expectations: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+    run: Mapped[PipelineRunRow] = relationship(back_populates="review")
+    expected_progress: Mapped[list["IntentReviewProgressRow"]] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="IntentReviewProgressRow.order_index",
+    )
+    expected_end: Mapped["IntentReviewEndRow | None"] = relationship(
+        back_populates="review",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        uselist=False,
+    )
+
+
+class IntentReviewProgressRow(_DBBase):
+    __tablename__ = "intent_review_progress"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    review_run_id: Mapped[str] = mapped_column(
+        ForeignKey("intent_reviews.run_id", ondelete="CASCADE")
+    )
+    order_index: Mapped[int] = mapped_column(Integer)
+    chat_log_delta: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tts_start_streaming: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+    review: Mapped[IntentReviewRow] = relationship(back_populates="expected_progress")
+
+
+class IntentReviewEndRow(_DBBase):
+    __tablename__ = "intent_review_end"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    review_run_id: Mapped[str] = mapped_column(
+        ForeignKey("intent_reviews.run_id", ondelete="CASCADE"), unique=True
+    )
+    order_index: Mapped[int] = mapped_column(Integer)
+    processed_locally: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    intent_output: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    review: Mapped[IntentReviewRow] = relationship(back_populates="expected_end")
 
 
 def get_db_path(hass: HomeAssistant) -> Path:
@@ -209,12 +276,63 @@ class IntentsityDBClient:
                     selectinload(PipelineRunRow.intent_starts),
                     selectinload(PipelineRunRow.intent_progress),
                     selectinload(PipelineRunRow.intent_ends),
+                    selectinload(PipelineRunRow.review)
+                    .selectinload(IntentReviewRow.expected_progress),
+                    selectinload(PipelineRunRow.review)
+                    .selectinload(IntentReviewRow.expected_end),
                 )
             )
             rows = session.scalars(stmt).all()
 
         runs = [self._row_to_model(row) for row in rows]
         return IntentRunListResponse(runs=runs)
+
+    def save_review(
+        self,
+        run_id: str,
+        intent_start_id: int | None,
+        matched_expectations: bool,
+        expected_progress: list[ExpectedIntentProgressRecord],
+        expected_end: ExpectedIntentEndRecord | None,
+    ) -> None:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            review = session.get(IntentReviewRow, run_id)
+            if review is None:
+                review = IntentReviewRow(run_id=run_id)
+                session.add(review)
+
+            review.intent_start_id = intent_start_id
+            review.matched_expectations = matched_expectations
+            review.updated_at = datetime.now(timezone.utc)
+
+            review.expected_progress.clear()
+            if review.expected_end is not None:
+                session.delete(review.expected_end)
+                review.expected_end = None
+            session.flush()
+
+            for progress in sorted(expected_progress, key=lambda item: item.order_index):
+                review.expected_progress.append(
+                    IntentReviewProgressRow(
+                        order_index=progress.order_index,
+                        chat_log_delta=json.dumps(progress.chat_log_delta)
+                        if progress.chat_log_delta is not None
+                        else None,
+                        tts_start_streaming=progress.tts_start_streaming,
+                    )
+                )
+
+            if expected_end is not None:
+                review.expected_end = IntentReviewEndRow(
+                    order_index=expected_end.order_index,
+                    processed_locally=expected_end.processed_locally,
+                    intent_output=json.dumps(expected_end.intent_output)
+                    if expected_end.intent_output is not None
+                    else None,
+                )
+
+            session.commit()
 
     def dispose(self) -> None:
         if self._engine is not None:
@@ -239,6 +357,7 @@ class IntentsityDBClient:
             intent_starts=[
                 IntentStartRecord(
                     run_id=row.run_id,
+                    id=start.id,
                     timestamp=start.timestamp,
                     engine=start.engine,
                     language=start.language,
@@ -253,6 +372,7 @@ class IntentsityDBClient:
             intent_progress=[
                 IntentProgressRecord(
                     run_id=row.run_id,
+                    id=progress.id,
                     timestamp=progress.timestamp,
                     chat_log_delta=json.loads(progress.chat_log_delta)
                     if progress.chat_log_delta
@@ -264,6 +384,7 @@ class IntentsityDBClient:
             intent_ends=[
                 IntentEndRecord(
                     run_id=row.run_id,
+                    id=end.id,
                     timestamp=end.timestamp,
                     processed_locally=end.processed_locally,
                     intent_output=json.loads(end.intent_output)
@@ -272,6 +393,41 @@ class IntentsityDBClient:
                 )
                 for end in row.intent_ends
             ],
+            review=self._review_to_model(row.review),
+        )
+
+    def _review_to_model(self, review: IntentReviewRow | None) -> IntentReviewRecord | None:
+        if review is None:
+            return None
+
+        expected_progress = [
+            ExpectedIntentProgressRecord(
+                order_index=progress.order_index,
+                chat_log_delta=json.loads(progress.chat_log_delta)
+                if progress.chat_log_delta
+                else None,
+                tts_start_streaming=progress.tts_start_streaming,
+            )
+            for progress in review.expected_progress
+        ]
+
+        expected_end = None
+        if review.expected_end is not None:
+            expected_end = ExpectedIntentEndRecord(
+                order_index=review.expected_end.order_index,
+                processed_locally=review.expected_end.processed_locally,
+                intent_output=json.loads(review.expected_end.intent_output)
+                if review.expected_end.intent_output
+                else None,
+            )
+
+        return IntentReviewRecord(
+            run_id=review.run_id,
+            intent_start_id=review.intent_start_id,
+            matched_expectations=review.matched_expectations,
+            updated_at=review.updated_at,
+            expected_progress=expected_progress,
+            expected_end=expected_end,
         )
 
     def _get_engine(self) -> Engine:
@@ -323,3 +479,20 @@ def insert_intent_end(hass: HomeAssistant, payload: IntentEndRecord) -> None:
 
 def fetch_recent_runs(hass: HomeAssistant, limit: int) -> IntentRunListResponse:
     return _get_client(hass).fetch_recent_runs(limit)
+
+
+def save_review(
+    hass: HomeAssistant,
+    run_id: str,
+    intent_start_id: int | None,
+    matched_expectations: bool,
+    expected_progress: list[ExpectedIntentProgressRecord],
+    expected_end: ExpectedIntentEndRecord | None,
+) -> None:
+    _get_client(hass).save_review(
+        run_id,
+        intent_start_id,
+        matched_expectations,
+        expected_progress,
+        expected_end,
+    )
