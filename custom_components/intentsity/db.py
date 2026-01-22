@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Final
+from typing import Final
 
 from homeassistant.core import HomeAssistant
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKey,
     Integer,
@@ -32,7 +31,6 @@ def _utcnow() -> datetime:
 
 class _DBBase(DeclarativeBase):
     pass
-
 
 
 # New chat-centric schema
@@ -147,22 +145,10 @@ class IntentsityDBClient:
         return chats
 
 
-
-
-
-
-
-
-
-
-
     def dispose(self) -> None:
         if self._engine is not None:
             self._engine.dispose()
             self._engine = None
-
-
-
 
 
     def _get_engine(self) -> Engine:
@@ -211,3 +197,14 @@ def init_db(hass: HomeAssistant) -> None:
 
 
 
+
+def insert_chat(hass: HomeAssistant, chat: Chat) -> int:
+    return _get_client(hass).insert_chat(chat)
+
+
+def insert_chat_message(hass: HomeAssistant, chat_id: int, message: ChatMessage) -> int:
+    return _get_client(hass).insert_chat_message(chat_id, message)
+
+
+def fetch_recent_chats(hass: HomeAssistant, limit: int) -> list[Chat]:
+    return _get_client(hass).fetch_recent_chats(limit)

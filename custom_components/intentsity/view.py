@@ -1,20 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from aiohttp import web
-
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.http import HomeAssistantView
-
-from .const import (
-    DEFAULT_EVENT_LIMIT,
-    MAX_EVENT_LIMIT,
-    WS_CMD_LIST_EVENTS,
-    WS_CMD_SAVE_REVIEW,
-    WS_CMD_SUBSCRIBE_EVENTS,
-)
-
 PANEL_URL_PATH = "intentsity"
 PANEL_URL = f"/{PANEL_URL_PATH}.js?3"
 

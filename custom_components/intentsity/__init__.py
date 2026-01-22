@@ -1,44 +1,28 @@
 from __future__ import annotations
 
-import json
 import logging
-from collections.abc import Mapping
 from datetime import datetime, timezone
 from random import randint
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import voluptuous as vol
 
 from homeassistant.components.assist_pipeline.pipeline import (
-    PipelineEvent,
     PipelineEventType,
-    PipelineRun,
 )
 from homeassistant.components.conversation.chat_log import async_subscribe_chat_logs
 from homeassistant.components.conversation.const import ChatLogEventType
-from homeassistant.components.frontend import add_extra_js_url, async_register_built_in_panel
+from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from . import db, view, websocket
+from . import db, websocket
 from .const import DOMAIN, SIGNAL_EVENT_RECORDED
 
 _LOGGER = logging.getLogger(__name__)
 
-
-OriginalProcessEvent = Callable[[PipelineRun, PipelineEvent], Awaitable[None] | None]
-import json
-from datetime import datetime, date
-
-class DateTimeEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, (datetime, date)):
-            return o.isoformat()
-        return super().default(o)
-
-_ORIGINAL_PROCESS_EVENT: OriginalProcessEvent | None = None
 
 DATA_DB_INITIALIZED = "db_initialized"
 DATA_API_REGISTERED = "api_registered"
@@ -65,19 +49,66 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Subscribe to chat log events instead of monkey patching pipeline
-    async_subscribe_chat_logs(hass, chat_log_callback)
+    async_subscribe_chat_logs(hass, lambda cid, et, data: chat_log_callback(hass, cid, et, data))
     await _async_initialize(hass)
     return True
 
 
 
-def chat_log_callback(conversation_id: str, event_type: ChatLogEventType, data: dict[str, Any]) -> None:
-    # This callback will receive chat log events from Home Assistant's conversation integration
-    _LOGGER.info(json.dumps({
-        "conversation_id": conversation_id,
-        "event_type": event_type,
-        "data": data,
-    }, cls=DateTimeEncoder))
+def chat_log_callback(hass: HomeAssistant, conversation_id: str, event_type: ChatLogEventType, data: dict[str, Any]) -> None:
+    # Receive chat log events from Home Assistant's conversation integration
+    _LOGGER.info("Chat event: %s %s %s", conversation_id, event_type, data)
+    
+    # We only care about CONTENT_ADDED for now
+    if event_type != ChatLogEventType.CONTENT_ADDED:
+        return
+
+    from .models import ChatMessage, Chat
+    
+    # Prepare message model
+    message = ChatMessage(
+        timestamp=datetime.now(timezone.utc),
+        sender=data.get("sender", "unknown"),
+        text=data.get("message", ""),
+        data=data,
+    )
+
+    # In a real setup, we might want to map conversation_id to an existing Chat record
+    # For simplicity, we'll try to find a recent chat with this conversation_id or create a new one
+    # But since this is a callback (sync), we need to use a task or executor for DB work
+    from . import db
+    
+    @callback
+    def _async_persist():
+        # This is a bit complex for a callback. Let's run it in a task.
+        async def _persist():
+            # In a more robust implementation, we might cache the chat_id for a conversation_id
+            # For now, we'll just insert it as a new chat if we don't have a mapping, 
+            # or we could just always create a new Chat record if we want strictly message-by-message logs.
+            # Actually, the requirement was "one-to-many to ChatMessages".
+            # Let's see if we can find a recent chat.
+            chats = await hass.async_add_executor_job(db.fetch_recent_chats, hass, 1)
+            target_chat_id = None
+            if chats and chats[0].conversation_id == conversation_id:
+                target_chat_id = chats[0].id
+            
+            if target_chat_id is None:
+                # Create a new Chat record
+                new_chat = Chat(
+                    created_at=datetime.now(timezone.utc),
+                    conversation_id=conversation_id,
+                    messages=[message]
+                )
+                await hass.async_add_executor_job(db.insert_chat, hass, new_chat)
+            else:
+                # Add to existing Chat record
+                await hass.async_add_executor_job(db.insert_chat_message, hass, target_chat_id, message)
+            
+            async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
+
+        hass.async_create_task(_persist())
+
+    _async_persist()
 
 
 
@@ -122,7 +153,6 @@ async def _async_initialize(hass: HomeAssistant) -> None:
             require_admin=True,
         )
         domain_data[DATA_API_REGISTERED] = True
-
 
 
 

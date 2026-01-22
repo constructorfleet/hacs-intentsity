@@ -5,33 +5,38 @@ from datetime import datetime, timezone
 from custom_components.intentsity import models
 
 
-def test_intent_end_from_payload_handles_string_json() -> None:
-    timestamp = datetime.now(timezone.utc)
-    payload = {"processed_locally": True, "intent_output": {"speech": "hi"}}
-
-    record = models.IntentEndRecord.from_payload("run-1", timestamp, payload)
-
-    assert record.run_id == "run-1"
-    assert record.processed_locally is True
-    assert record.intent_output["speech"] == "hi"
-
-
-def test_intent_progress_from_payload_parses_delta() -> None:
-    timestamp = datetime.now(timezone.utc)
-    payload = {"chat_log_delta": {"role": "assistant", "content": "Hi"}, "tts_start_streaming": True}
-
-    record = models.IntentProgressRecord.from_payload("run-1", timestamp, payload)
-
-    assert record.chat_log_delta == {"role": "assistant", "content": "Hi"}
-    assert record.tts_start_streaming is True
-
-
-def test_pipeline_run_record_defaults_lists() -> None:
-    record = models.PipelineRunRecord(
-        run_id="r-1",
-        created_at=datetime.now(timezone.utc),
+def test_chat_message_validation() -> None:
+    now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    msg = models.ChatMessage(
+        timestamp=now,
+        sender="user",
+        text="Hello world",
+        data={"some": "extra"}
     )
+    assert msg.sender == "user"
+    assert msg.text == "Hello world"
+    assert msg.data == {"some": "extra"}
 
-    assert record.intent_starts == []
-    assert record.intent_progress == []
-    assert record.intent_ends == []
+
+def test_chat_validation() -> None:
+    now = datetime(2025, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    chat = models.Chat(
+        created_at=now,
+        conversation_id="conv-123",
+        messages=[
+            models.ChatMessage(
+                timestamp=now,
+                sender="user",
+                text="Ping",
+            ),
+            models.ChatMessage(
+                timestamp=now,
+                sender="assistant",
+                text="Pong",
+            )
+        ]
+    )
+    assert chat.conversation_id == "conv-123"
+    assert len(chat.messages) == 2
+    assert chat.messages[0].sender == "user"
+    assert chat.messages[1].text == "Pong"

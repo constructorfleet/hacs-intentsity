@@ -6,32 +6,46 @@ This repository ships a Home Assistant custom component that records Assist Pipe
 
 ## Mission Overview
 
+
 Agents working in this repository must enforce the following invariants:
 
-- Patch `PipelineRun.process_event` exactly once during `async_setup`. The patch **must** be idempotent and safe across reloads.
-- Persist Assist `INTENT_START` and `INTENT_END` events to the SQLite database defined in `const.py`.
-- Expose captured events through:
-  - REST API: `/api/intentsity/events`
-  - Review panel iframe: `/assist-intent-review`
+- **Do not monkey patch Home Assistant internals.** Instead, subscribe to chat log events using `async_subscribe_chat_logs`.
+- Persist Assist chat logs as `Chats` and `ChatMessages` in the SQLite database defined in `const.py`.
 - Never block the Assist pipeline. Logging must be observational, not invasive.
+
 
 If you are unsure whether a change violates one of these rules, assume it does.
 
 ---
 
+
 ## Repository Map (Know Where You’re Standing)
 
 - `custom_components/intentsity/__init__.py`  
-  Runtime wiring, pipeline patching, HTTP views, and panel registration.
+  Runtime wiring, chat log subscription, HTTP views, and panel registration.
 
 - `custom_components/intentsity/models.py`  
-  Pydantic models for Assist payloads, persistence objects, and API responses.
+  Pydantic models for `Chat` and `ChatMessage` objects, persistence, and API responses.
 
 - `custom_components/intentsity/const.py`  
   Domain constants, schema definitions, and database configuration.
 
+- `custom_components/intentsity/db.py`  
+  Database schema and persistence for chats and messages.
+
+- `custom_components/intentsity/websocket.py`  
+  WebSocket API for listing and subscribing to chat events.
+
+- `custom_components/intentsity/panel.js`  
+  Custom panel UI for reviewing chats and messages.
+
 - `tests/`  
   All automated coverage. New behavior without tests is considered broken by default.
+
+- `custom_components/intentsity/panel.js`  
+  Custom panel UI for reviewing chats and messages. (Built from `js/panel/main.tsx` using `npm run build`)
+
+> **Note:** The UI source for reviewing chats is located at `js/panel/main.tsx`. Build the panel using `npm run build`, which rolls up the TypeScript and outputs the result to `custom_components/intentsity/panel.js`.
 
 - `README.md`  
   User-facing documentation. If behavior changes and this file does not, the change is incomplete.
@@ -50,21 +64,18 @@ If you are unsure whether a change violates one of these rules, assume it does.
    All heavy DB reads/writes must run inside `async_add_executor_job`.  
    Blocking the event loop is a failure condition.
 
+
 4. **Schema Changes**  
-   - Update schema constants.
-   - Document migrations.
-   - Bump the manifest version.
-   - Assume existing installs matter.
+  - Update schema constants.
+  - Document migrations (not required for initial chat schema).
+  - Bump the manifest version.
+  - Assume existing installs matter.
 
 5. **Documentation Drift Check**  
    If API shape, schema, or UI behavior changes, update README and changelog in the same commit.
 
 6. **Tests Are Mandatory**  
    Extend or add tests whenever behavior changes. Target edge cases, not happy paths.
-
-7. **Panel Assets**  
-   Keep iframe HTML and static assets synchronized with API behavior.  
-   Never inline large HTML blobs in Python files.
 
 ---
 
@@ -105,17 +116,19 @@ All items must be satisfied before tagging a release:
 
 ## Troubleshooting & Triage
 
-- Fast iteration on pipeline logging:
+
+- Fast iteration on chat logging:
   ```
-  uv run pytest tests/test_runtime.py -k intent
+  uv run pytest tests/test_runtime.py -k chat
   ```
 
 - Panel fails to load:
   - Check browser console for CSP violations
   - Confirm iframe URL matches `_PANEL_URL_PATH`
 
+
 - Database schema issues:
-  - Local dev: delete `intentsity.db` and rerun `async_setup`
+  - Local dev: delete `intentsity.db` and rerun `async_setup` to reset chat schema
   - Production: never ship breaking schema changes without an upgrade path
 
 If something feels fragile, it probably is. Fix it properly instead of hoping no one notices.

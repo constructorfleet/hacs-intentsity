@@ -3,7 +3,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-import pytest
 import pytest_asyncio
 
 ROOT_PATH = Path(__file__).resolve().parents[1]

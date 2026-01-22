@@ -7,18 +7,18 @@ import { babel } from "@rollup/plugin-babel";
 const dev = process.env.ROLLUP_WATCH;
 
 export default [
-  {
-    input: "js/panel/main.ts",
-    output: {
-      file: "custom_components/intentsity/panel.js",
-      format: "es",
+    {
+        input: "js/panel/main.tsx",
+        output: {
+            file: "custom_components/intentsity/panel.js",
+            format: "es",
+        },
+        plugins: [
+            nodeResolve(),
+            json(),
+            typescript(),
+            babel({ babelHelpers: 'bundled', exclude: "node_modules/**" }),
+            !dev && terser({ format: { comments: false } }),
+        ],
     },
-    plugins: [
-      nodeResolve(),
-      json(),
-      typescript(),
-      babel({ babelHelpers: 'bundled', exclude: "node_modules/**" }),
-      !dev && terser({ format: { comments: false } }),
-    ],
-  },
 ];
