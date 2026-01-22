@@ -1,10 +1,13 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
 const LIST_COMMAND = "intentsity/chats/list";
 const SUBSCRIBE_COMMAND = "intentsity/chats/subscribe";
+const SAVE_CORRECTED_COMMAND = "intentsity/chats/corrected/save";
 
 type HassSubscription = () => void;
 type HassMessageRequest = Record<string, unknown>;
@@ -19,18 +22,37 @@ interface HassConnection {
 
 interface ChatMessage {
     id?: number;
-    chat_id?: number;
+    chat_id?: string;
     timestamp: string;
     sender: string;
     text: string;
     data: Record<string, any>;
 }
 
-interface Chat {
+interface CorrectedChatMessage {
     id?: number;
+    corrected_chat_id?: string;
+    original_message_id?: number | null;
+    position: number;
+    timestamp: string;
+    sender: string;
+    text: string;
+    data: Record<string, any>;
+}
+
+interface CorrectedChat {
+    conversation_id: string;
+    original_conversation_id: string;
     created_at: string;
-    conversation_id?: string;
+    updated_at: string;
+    messages: CorrectedChatMessage[];
+}
+
+interface Chat {
+    conversation_id: string;
+    created_at: string;
     messages: ChatMessage[];
+    corrected?: CorrectedChat | null;
 }
 
 interface SubscriptionMessage {
@@ -51,47 +73,24 @@ const clampLimit = (raw: number | string): number => {
 };
 
 const formatTimestamp = (value: string): string => new Date(value).toLocaleString();
+const toJsonText = (value: Record<string, any> | undefined): string =>
+    JSON.stringify(value ?? {}, null, 2);
 
-const buttonStyles = css`
-    button {
-        padding: 8px 18px;
-        border-radius: 999px;
-        border: none;
-        background: var(--accent);
-        color: #041727;
-        font-weight: 600;
-        cursor: pointer;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    button:hover {
-        transform: translateY(-1px);
-        box-shadow: 0 12px 28px rgba(125, 212, 255, 0.35);
-    }
-
-    button:disabled {
-        opacity: 0.6;
-        cursor: not-allowed;
-    }
-`;
-
-const pillStyles = css`
-    .pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 12px;
-        border-radius: 999px;
-        background: rgba(125, 212, 255, 0.15);
-        color: var(--accent);
-        font-size: 12px;
-        letter-spacing: 0.03em;
-    }
-`;
+type DraftMessage = {
+    original_message_id?: number | null;
+    timestamp: string;
+    sender: string;
+    text: string;
+    dataText: string;
+};
 
 @customElement("intentsity-chat-message")
 class IntentsityChatMessage extends LitElement {
     @property({ attribute: false }) message!: ChatMessage;
+
+    private get toolResultJson(): string {
+        return JSON.stringify(this.message.data?.tool_result ?? {}, null, 2);
+    }
 
     static styles = css`
         :host {
@@ -102,20 +101,19 @@ class IntentsityChatMessage extends LitElement {
             display: flex;
             flex-direction: column;
             gap: 4px;
-            padding: 12px;
-            border-radius: 12px;
-            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 8px;
         }
         .user {
             align-self: flex-end;
-            background: var(--accent);
-            color: #041727;
+            background: var(--primary-color);
+            color: var(--text-primary-color);
         }
         .assistant {
             align-self: flex-start;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            color: var(--text);
+            background: var(--ha-card-background, var(--card-background-color));
+            border: 1px solid var(--divider-color);
+            color: var(--primary-text-color);
         }
         .sender {
             font-size: 10px;
@@ -127,6 +125,35 @@ class IntentsityChatMessage extends LitElement {
             font-size: 14px;
             line-height: 1.4;
         }
+        .meta {
+            display: grid;
+            grid-template-columns: max-content 1fr;
+            gap: 4px 12px;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--secondary-text-color);
+        }
+        .meta dt {
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+        }
+        .meta dd {
+            margin: 0;
+            color: var(--primary-text-color);
+            word-break: break-word;
+        }
+        .metadata {
+            margin-top: 8px;
+            border-radius: 6px;
+            padding: 8px;
+            background: var(--code-editor-background-color, rgba(0, 0, 0, 0.1));
+            color: var(--primary-text-color);
+            font-family: var(--code-font-family, monospace);
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
         .time {
             font-size: 10px;
             opacity: 0.5;
@@ -136,56 +163,453 @@ class IntentsityChatMessage extends LitElement {
 
     render() {
         const isUser = this.message.sender === "user";
+        const metadata = this.message.data ?? {};
+        const role = metadata.role ?? this.message.sender;
+        const created = metadata.created ?? this.message.timestamp;
+        const agentId = metadata.agent_id;
+        const toolCallId = metadata.tool_call_id;
+        const toolName = metadata.tool_name;
+        const toolResult = metadata.tool_result;
+        const content = metadata.content ?? this.message.text;
+        const metaRows = [
+            ["Role", role],
+            ["Created", created],
+            ["Agent", agentId],
+            ["Tool Call", toolCallId],
+            ["Tool Name", toolName],
+        ].filter(([, value]) => value !== undefined && value !== null && value !== "");
         return html`
-            <div class="message ${isUser ? "user" : "assistant"}">
-                <span class="sender">${this.message.sender}</span>
-                <div class="text">${this.message.text}</div>
-                <span class="time">${formatTimestamp(this.message.timestamp)}</span>
-            </div>
+            <ha-card class="message ${isUser ? "user" : "assistant"}">
+                <span class="sender">${role}</span>
+                ${metaRows.length
+                    ? html`
+                          <dl class="meta">
+                              ${metaRows.map(
+                                  ([label, value]) => html`
+                                      <dt>${label}</dt>
+                                      <dd>${label === "Created" ? formatTimestamp(String(value)) : value}</dd>
+                                  `,
+                              )}
+                          </dl>
+                      `
+                    : nothing}
+                ${!toolResult && content
+                    ? html`<intentsity-markdown class="text" .content=${String(content)}></intentsity-markdown>`
+                    : nothing}
+                ${toolResult ? html`<div class="metadata">${this.toolResultJson}</div>` : nothing}
+                ${created ? html`<span class="time">${formatTimestamp(String(created))}</span>` : nothing}
+            </ha-card>
         `;
+    }
+}
+
+@customElement("intentsity-markdown")
+class IntentsityMarkdown extends LitElement {
+    @property({ type: String }) content = "";
+
+    static styles = css`
+        :host {
+            display: block;
+        }
+        :host ::slotted(*) {
+            margin: 0;
+        }
+        .markdown {
+            line-height: 1.5;
+            word-break: break-word;
+        }
+        .markdown pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .markdown code {
+            font-family: var(--code-font-family, monospace);
+        }
+    `;
+
+    protected updated(): void {
+        const htmlContent = marked.parse(this.content ?? "", {
+            breaks: true,
+            async: false,
+        }) as string;
+        const sanitized = DOMPurify.sanitize(htmlContent, { USE_PROFILES: { html: true } });
+        const container = this.renderRoot.querySelector(".markdown");
+        if (container) {
+            container.innerHTML = sanitized;
+        }
+    }
+
+    render() {
+        return html`<div class="markdown"></div>`;
     }
 }
 
 @customElement("intentsity-chat-list")
 class IntentsityChatList extends LitElement {
     @property({ attribute: false }) chats: Chat[] = [];
+    @property({ attribute: false }) onSaveCorrected?: (conversationId: string, messages: CorrectedChatMessage[]) => Promise<void>;
+    @state() private drafts: Record<string, DraftMessage[]> = {};
+    @state() private errors: Record<string, string | undefined> = {};
+    @state() private saving: Record<string, boolean> = {};
+    @state() private expanded: Record<string, boolean> = {};
+    @state() private dialogOpen = false;
+    @state() private dialogchatId: string | null = null;
+    @state() private dialogIndex: number | null = null;
+    @state() private dialogField: "text" | "data" | null = null;
+    @state() private dialogValue = "";
 
     static styles = [
-        pillStyles,
         css`
             :host {
                 display: block;
             }
-            .chat-card {
-                background: var(--card-bg);
-                border: 1px solid var(--card-border);
-                border-radius: 18px;
-                padding: 18px;
-                margin-bottom: 24px;
-                box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            ha-card {
+                margin-bottom: 16px;
             }
             .chat-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
-                margin-bottom: 16px;
+                gap: 8px;
                 padding-bottom: 12px;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+                border-bottom: 1px solid var(--divider-color);
+                flex-wrap: wrap;
+            }
+            .header-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+                flex: 1;
+                min-width: 220px;
             }
             .messages-list {
                 display: flex;
                 flex-direction: column;
             }
             .empty-state {
-                padding: 48px;
+                padding: 32px;
                 text-align: center;
-                color: var(--muted);
-                background: rgba(255, 255, 255, 0.02);
-                border-radius: 18px;
-                border: 1px dashed rgba(255, 255, 255, 0.1);
+                color: var(--secondary-text-color);
+                border-radius: 8px;
+                border: 1px dashed var(--divider-color);
+            }
+            .comparison {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+                gap: 16px;
+            }
+            .panel {
+                padding: 12px;
+                border-radius: 8px;
+                border: 1px solid var(--divider-color);
+            }
+            .panel h4 {
+                margin: 0 0 12px;
+                font-size: 14px;
+                text-transform: uppercase;
+                letter-spacing: 0.08em;
+                color: var(--secondary-text-color);
+            }
+            .draft-message {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding: 12px;
+                border-radius: 8px;
+                border: 1px solid var(--divider-color);
+                margin-bottom: 12px;
+            }
+            .draft-controls {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+            .chip-row {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                align-items: center;
+            }
+            .preview {
+                color: var(--secondary-text-color);
+                font-size: 12px;
+                line-height: 1.4;
+            }
+            ha-assist-chip {
+                --mdc-chip-container-color: var(--state-icon-color, var(--primary-color));
+                --mdc-chip-label-text-color: var(--text-primary-color, #fff);
+                --mdc-chip-height: 24px;
+            }
+            ha-button {
+                --mdc-theme-primary: var(--primary-color);
+            }
+            textarea,
+            input[type="text"] {
+                background: var(--card-background-color);
+                border: 1px solid var(--divider-color);
+                color: var(--primary-text-color);
+                border-radius: 4px;
+                padding: 8px 10px;
+                font-family: var(--primary-font-family);
+                font-size: 13px;
+            }
+            textarea {
+                min-height: 80px;
+                resize: vertical;
+            }
+            .error {
+                color: var(--error-color);
+                font-size: 12px;
+                margin-top: 8px;
+            }
+            .save-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                margin-top: 12px;
+            }
+            .field-row {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .field-row ha-textfield {
+                flex: 1;
+            }
+            .dialog-body ha-textfield,
+            .dialog-body textarea {
+                width: 100%;
+            }
+            .dialog-body .dialog-textarea {
+                min-height: 60vh;
+                max-height: 60vh;
+                padding: 12px;
+                border-radius: 8px;
+                border: 1px solid var(--divider-color);
+                background: var(--card-background-color);
+                color: var(--primary-text-color);
+                font-family: var(--code-font-family, monospace);
+                font-size: 13px;
+                resize: vertical;
+            }
+            ha-dialog {
+                --mdc-dialog-min-width: 70vw;
+                --mdc-dialog-max-width: 70vw;
+                --mdc-dialog-min-height: 70vh;
+                --mdc-dialog-max-height: 70vh;
+            }
+            .dialog-body {
+                min-height: 60vh;
             }
         `
     ];
+
+    protected willUpdate(changed: Map<string, unknown>): void {
+        if (!changed.has("chats")) {
+            return;
+        }
+        const updatedDrafts: Record<string, DraftMessage[]> = { ...this.drafts };
+        const updatedExpanded: Record<string, boolean> = { ...this.expanded };
+        const chatIds = new Set<string>();
+        this.chats.forEach((chat, index) => {
+            const conversationId = chat.conversation_id;
+            chatIds.add(conversationId);
+            if (updatedDrafts[conversationId]) {
+                return;
+            }
+            const seedMessages = chat.corrected?.messages?.length
+                ? chat.corrected.messages
+                : chat.messages.map((msg, index) => ({
+                      id: undefined,
+                      corrected_chat_id: undefined,
+                      original_message_id: msg.id,
+                      position: index,
+                      timestamp: msg.timestamp,
+                      sender: msg.sender,
+                      text: msg.text,
+                      data: msg.data ?? {},
+                  }));
+
+            updatedDrafts[conversationId] = seedMessages.map((msg) => ({
+                original_message_id: msg.original_message_id ?? null,
+                timestamp: msg.timestamp,
+                sender: msg.sender,
+                text: msg.text,
+                dataText: toJsonText(msg.data),
+            }));
+
+            if (updatedExpanded[conversationId] === undefined) {
+                updatedExpanded[conversationId] = index === 0;
+            }
+        });
+
+        Object.keys(updatedDrafts).forEach((key) => {
+            if (!chatIds.has(key)) {
+                delete updatedDrafts[key];
+            }
+        });
+        Object.keys(updatedExpanded).forEach((key) => {
+            if (!chatIds.has(key)) {
+                delete updatedExpanded[key];
+            }
+        });
+        this.drafts = updatedDrafts;
+        this.expanded = updatedExpanded;
+    }
+
+    private updateDraft(chatId: string, index: number, update: Partial<DraftMessage>): void {
+        const existing = this.drafts[chatId];
+        if (!existing) {
+            return;
+        }
+        const next = [...existing];
+        next[index] = { ...next[index], ...update };
+        this.drafts = { ...this.drafts, [chatId]: next };
+    }
+
+    private moveDraft(chatId: string, index: number, direction: -1 | 1): void {
+        const existing = this.drafts[chatId];
+        if (!existing) {
+            return;
+        }
+        const nextIndex = index + direction;
+        if (nextIndex < 0 || nextIndex >= existing.length) {
+            return;
+        }
+        const next = [...existing];
+        const [item] = next.splice(index, 1);
+        next.splice(nextIndex, 0, item);
+        this.drafts = { ...this.drafts, [chatId]: next };
+    }
+
+    private addDraft(chatId: string): void {
+        const existing = this.drafts[chatId] ?? [];
+        const next = [
+            ...existing,
+            {
+                original_message_id: null,
+                timestamp: new Date().toISOString(),
+                sender: "assistant",
+                text: "",
+                dataText: "{}",
+            },
+        ];
+        this.drafts = { ...this.drafts, [chatId]: next };
+    }
+
+    private removeDraft(chatId: string, index: number): void {
+        const existing = this.drafts[chatId];
+        if (!existing) {
+            return;
+        }
+        const next = existing.filter((_, idx) => idx !== index);
+        this.drafts = { ...this.drafts, [chatId]: next };
+    }
+
+    private async handleSave(chatId: string): Promise<void> {
+        const draft = this.drafts[chatId] ?? [];
+        const parsed: CorrectedChatMessage[] = [];
+        for (let index = 0; index < draft.length; index += 1) {
+            const message = draft[index];
+            try {
+                const data = JSON.parse(message.dataText || "{}");
+                parsed.push({
+                    original_message_id: message.original_message_id ?? null,
+                    position: index,
+                    timestamp: message.timestamp,
+                    sender: message.sender,
+                    text: message.text,
+                    data,
+                });
+            } catch (error) {
+                this.errors = {
+                    ...this.errors,
+                    [chatId]: `Invalid JSON in message ${index + 1}.`,
+                };
+                return;
+            }
+        }
+        this.errors = { ...this.errors, [chatId]: undefined };
+        if (!this.onSaveCorrected) {
+            return;
+        }
+        this.saving = { ...this.saving, [chatId]: true };
+        try {
+            await this.onSaveCorrected(chatId, parsed);
+        } finally {
+            this.saving = { ...this.saving, [chatId]: false };
+        }
+    }
+
+    private toggleExpanded(chatId: string): void {
+        this.expanded = { ...this.expanded, [chatId]: !this.expanded[chatId] };
+    }
+
+    private getFirstUserSnippet(chat: Chat): string {
+        const message = chat.messages.find((msg) => msg.sender === "user");
+        if (!message) {
+            return "No user messages yet.";
+        }
+        const text = message.text ?? "";
+        if (text.length <= 100) {
+            return text;
+        }
+        return `${text.slice(0, 100)}…`;
+    }
+
+    private openDialog(chatId: string, index: number, field: "text" | "data"): void {
+        const draft = this.drafts[chatId]?.[index];
+        if (!draft) {
+            return;
+        }
+        const value = field === "data"
+            ? this.prettyJson(draft.dataText || "{}")
+            : draft.text ?? "";
+        this.dialogchatId = chatId;
+        this.dialogIndex = index;
+        this.dialogField = field;
+        this.dialogValue = value;
+        this.dialogOpen = true;
+    }
+
+    private closeDialog(): void {
+        this.dialogOpen = false;
+        this.dialogchatId = null;
+        this.dialogIndex = null;
+        this.dialogField = null;
+        this.dialogValue = "";
+    }
+
+    private prettyJson(raw: string): string {
+        try {
+            const parsed = JSON.parse(raw);
+            return JSON.stringify(parsed, null, 2);
+        } catch (error) {
+            return raw;
+        }
+    }
+
+    private saveDialog(): void {
+        if (
+            this.dialogchatId === null ||
+            this.dialogIndex === null ||
+            this.dialogField === null
+        ) {
+            this.closeDialog();
+            return;
+        }
+        const value = this.dialogField === "data"
+            ? this.prettyJson(this.dialogValue)
+            : this.dialogValue;
+        if (this.dialogField === "data") {
+            this.updateDraft(this.dialogchatId, this.dialogIndex, { dataText: value });
+        } else {
+            this.updateDraft(this.dialogchatId, this.dialogIndex, { text: value });
+        }
+        this.closeDialog();
+    }
 
     render() {
         if (!this.chats.length) {
@@ -198,21 +622,166 @@ class IntentsityChatList extends LitElement {
         }
         return html`
             <div class="chat-grid">
-                ${this.chats.map(chat => html`
-                    <article class="chat-card">
-                        <div class="chat-header">
-                            <span class="pill">ID: ${chat.id}</span>
-                            <span class="time">${formatTimestamp(chat.created_at)}</span>
-                            ${chat.conversation_id ? html`<span class="pill">${chat.conversation_id}</span>` : nothing}
+                ${this.chats.map((chat) => {
+                    const chatId = chat.conversation_id;
+                    const isExpanded = this.expanded[chatId] ?? false;
+                    const preview = this.getFirstUserSnippet(chat);
+                    return html`
+                    <ha-card>
+                        <div class="card-content">
+                            <div class="chat-header">
+                                <div class="header-row">
+                                    <ha-button @click=${() => this.toggleExpanded(chatId)}>
+                                        <ha-icon icon=${isExpanded ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
+                                        ${isExpanded ? "Collapse" : "Expand"}
+                                    </ha-button>
+                                    <ha-chip-set class="chip-row">
+                                        <ha-assist-chip label="Conversation ${chat.conversation_id}" hasIcon>
+                                            <ha-icon slot="icon" icon="mdi:conversation"></ha-icon>
+                                        </ha-assist-chip>
+                                        ${chat.corrected?.updated_at
+                                            ? html`
+                                                  <ha-assist-chip label="Corrected ${formatTimestamp(chat.corrected.updated_at)}" hasIcon>
+                                                      <ha-icon slot="icon" icon="mdi:check-circle"></ha-icon>
+                                                  </ha-assist-chip>
+                                              `
+                                            : nothing}
+                                    </ha-chip-set>
+                                    ${!isExpanded ? html`<div class="preview">${preview}</div>` : nothing}
+                                </div>
+                                <span class="time">${formatTimestamp(chat.created_at)}</span>
+                            </div>
+                                    ${isExpanded
+                                        ? html`
+                                      <div class="comparison">
+                                          <section class="panel">
+                                              <h4>Original</h4>
+                                              <div class="messages-list">
+                                                  ${chat.messages.map(msg => html`
+                                                      <intentsity-chat-message .message=${msg}></intentsity-chat-message>
+                                                  `)}
+                                              </div>
+                                          </section>
+                                          <section class="panel">
+                                              <h4>Corrected</h4>
+                                              ${(this.drafts[chatId] ?? []).map((draft, index) => html`
+                                                  <div class="draft-message">
+                                                      <div class="draft-controls">
+                                                          <ha-button @click=${() => this.moveDraft(chatId, index, -1)}>
+                                                              <ha-icon icon="mdi:arrow-up"></ha-icon>
+                                                              Up
+                                                          </ha-button>
+                                                          <ha-button @click=${() => this.moveDraft(chatId, index, 1)}>
+                                                              <ha-icon icon="mdi:arrow-down"></ha-icon>
+                                                              Down
+                                                          </ha-button>
+                                                          <ha-button @click=${() => this.removeDraft(chatId, index)}>
+                                                              <ha-icon icon="mdi:delete"></ha-icon>
+                                                              Remove
+                                                          </ha-button>
+                                                          ${draft.original_message_id
+                                                              ? html`
+                                                                    <ha-chip-set class="chip-row">
+                                                                        <ha-assist-chip label="Original #${draft.original_message_id}" hasIcon>
+                                                                            <ha-icon slot="icon" icon="mdi:message-text"></ha-icon>
+                                                                        </ha-assist-chip>
+                                                                    </ha-chip-set>
+                                                                `
+                                                              : html`
+                                                                    <ha-chip-set class="chip-row">
+                                                                        <ha-assist-chip label="New message" hasIcon>
+                                                                            <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
+                                                                        </ha-assist-chip>
+                                                                    </ha-chip-set>
+                                                                `}
+                                                      </div>
+                                                      <ha-textfield
+                                                          label="Sender"
+                                                          .value=${draft.sender}
+                                                          @input=${(event: Event) =>
+                                                              this.updateDraft(
+                                                                  chatId,
+                                                                  index,
+                                                                  { sender: (event.target as HTMLInputElement).value },
+                                                              )}
+                                                      ></ha-textfield>
+                                                      <div class="field-row">
+                                                          <ha-textfield
+                                                              label="Message"
+                                                              .value=${draft.text}
+                                                              @input=${(event: Event) =>
+                                                                  this.updateDraft(
+                                                                      chatId,
+                                                                      index,
+                                                                      { text: (event.target as HTMLInputElement).value },
+                                                                  )}
+                                                              multiline
+                                                          ></ha-textfield>
+                                                          <ha-button @click=${() => this.openDialog(chatId, index, "text")}>
+                                                              <ha-icon icon="mdi:pencil"></ha-icon>
+                                                          </ha-button>
+                                                      </div>
+                                                      <div class="field-row">
+                                                          <ha-textfield
+                                                              label="Metadata (JSON)"
+                                                              .value=${draft.dataText}
+                                                              @input=${(event: Event) =>
+                                                                  this.updateDraft(
+                                                                      chatId,
+                                                                      index,
+                                                                      { dataText: (event.target as HTMLInputElement).value },
+                                                                  )}
+                                                              multiline
+                                                          ></ha-textfield>
+                                                          <ha-button @click=${() => this.openDialog(chatId, index, "data")}>
+                                                              <ha-icon icon="mdi:pencil"></ha-icon>
+                                                          </ha-button>
+                                                      </div>
+                                                  </div>
+                                              `)}
+                                              <div class="save-row">
+                                                  <div class="draft-controls">
+                                                      <ha-button @click=${() => this.addDraft(chatId)}>
+                                                          <ha-icon icon="mdi:plus-circle"></ha-icon>
+                                                          Add message
+                                                      </ha-button>
+                                                  </div>
+                                                  <ha-button
+                                                      @click=${() => void this.handleSave(chatId)}
+                                                      ?disabled=${this.saving[chatId]}
+                                                  >
+                                                      <ha-icon icon="mdi:content-save"></ha-icon>
+                                                      ${this.saving[chatId] ? "Saving..." : "Save corrections"}
+                                                  </ha-button>
+                                              </div>
+                                              ${this.errors[chatId] ? html`<div class="error">${this.errors[chatId]}</div>` : nothing}
+                                          </section>
+                                      </div>
+                                  `
+                                : nothing}
                         </div>
-                        <div class="messages-list">
-                            ${chat.messages.map(msg => html`
-                                <intentsity-chat-message .message=${msg}></intentsity-chat-message>
-                            `)}
-                        </div>
-                    </article>
-                `)}
+                    </ha-card>
+                `;
+                })}
             </div>
+            <ha-dialog
+                .open=${this.dialogOpen}
+                @closed=${this.closeDialog}
+                heading=${this.dialogField === "data" ? "Edit metadata (JSON)" : "Edit message"}
+            >
+                <div class="dialog-body">
+                    <textarea
+                        class="dialog-textarea"
+                        rows="12"
+                        .value=${this.dialogValue}
+                        @input=${(event: Event) => {
+                            this.dialogValue = (event.target as HTMLTextAreaElement).value;
+                        }}
+                    ></textarea>
+                </div>
+                <ha-button slot="primaryAction" @click=${this.saveDialog}>Save</ha-button>
+                <ha-button slot="secondaryAction" @click=${this.closeDialog}>Cancel</ha-button>
+            </ha-dialog>
         `;
     }
 }
@@ -226,48 +795,24 @@ class IntentsityPanel extends LitElement {
     private connectionPromise?: Promise<HassConnection>;
 
     static styles = [
-        buttonStyles,
         css`
             :host {
-                --bg-gradient: radial-gradient(circle at top, #111430, #05060f 55%);
-                --card-bg: rgba(9, 12, 25, 0.92);
-                --card-border: rgba(125, 212, 255, 0.25);
-                --accent: #7dd4ff;
-                --text: #f4fbff;
-                --muted: #9fb1cc;
                 display: block;
-                font-family: "Space Grotesk", "Segoe UI", sans-serif;
-                margin: 0;
-                padding: 32px;
-                min-height: 100vh;
-                color: var(--text);
-                background: var(--bg-gradient);
+                padding: 16px;
+                color: var(--primary-text-color);
+                background: var(--lovelace-background, var(--primary-background-color));
             }
 
             h1 {
                 margin: 0 0 8px;
-                font-size: 30px;
+                font-size: 24px;
             }
 
             .controls {
                 display: flex;
                 align-items: center;
                 gap: 12px;
-                margin-bottom: 32px;
-            }
-
-            input[type="number"] {
-                background: rgba(255, 255, 255, 0.05);
-                border: 1px solid var(--card-border);
-                color: var(--text);
-                padding: 6px 10px;
-                border-radius: 8px;
-                width: 80px;
-            }
-
-            label {
-                font-weight: 600;
-                color: var(--muted);
+                margin-bottom: 16px;
             }
         `
     ];
@@ -317,6 +862,15 @@ class IntentsityPanel extends LitElement {
         } as any) as any));
     }
 
+    private async saveCorrected(chatId: string, messages: CorrectedChatMessage[]): Promise<void> {
+        const conn = await this.getConnection();
+        await conn.sendMessagePromise({
+            type: SAVE_CORRECTED_COMMAND,
+            conversation_id: chatId,
+            messages,
+        });
+    }
+
     protected firstUpdated(): void {
         void this.loadChats();
     }
@@ -334,21 +888,30 @@ class IntentsityPanel extends LitElement {
 
     render() {
         return html`
-            <h1>Assist Chat Log</h1>
-            <p>Observational log of all Home Assistant Assist conversations.</p>
+            <ha-card>
+                <div class="card-content">
+                    <h1>Assist Chat Log</h1>
+                    <p>Observational log of all Home Assistant Assist conversations.</p>
 
-            <div class="controls">
-                <label for="limit">Show last:</label>
-                <input
-                    id="limit"
-                    type="number"
-                    .value=${String(this.limit)}
-                    @change=${this.handleLimitChange}
-                />
-                <button @click=${() => void this.loadChats()}>Refresh</button>
-            </div>
+                    <div class="controls">
+                        <ha-textfield
+                            label="Show last"
+                            type="number"
+                            .value=${String(this.limit)}
+                            @change=${this.handleLimitChange}
+                        ></ha-textfield>
+                        <ha-button @click=${() => void this.loadChats()}>
+                            <ha-icon icon="mdi:refresh"></ha-icon>
+                            Refresh
+                        </ha-button>
+                    </div>
+                </div>
+            </ha-card>
 
-            <intentsity-chat-list .chats=${this.chats}></intentsity-chat-list>
+            <intentsity-chat-list
+                .chats=${this.chats}
+                .onSaveCorrected=${this.saveCorrected.bind(this)}
+            ></intentsity-chat-list>
         `;
     }
 }

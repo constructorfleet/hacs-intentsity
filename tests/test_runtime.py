@@ -45,7 +45,7 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
     # Let's test the DB logic directly through the helper
     from custom_components.intentsity.models import Chat, ChatMessage
 
-    chat_id = db.insert_chat(
+    conversation_id = db.insert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
@@ -62,7 +62,7 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
 
     db.insert_chat_message(
         hass,
-        chat_id,
+        conversation_id,
         ChatMessage(
             timestamp=datetime.now(timezone.utc),
             sender="assistant",
@@ -83,7 +83,7 @@ async def test_corrected_chat_persists_with_reordered_messages(hass: HomeAssista
     _setup_fresh_db(hass)
     from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
 
-    chat_id = db.insert_chat(
+    conversation_id = db.insert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
@@ -122,11 +122,12 @@ async def test_corrected_chat_persists_with_reordered_messages(hass: HomeAssista
         ),
     ]
 
-    db.upsert_corrected_chat(hass, chat_id, corrected_messages)
+    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
 
     chats = db.fetch_recent_chats(hass, 1)
     assert chats[0].corrected is not None
-    assert chats[0].corrected.original_chat_id == chat_id
+    assert chats[0].corrected.original_conversation_id == conversation_id
+    assert chats[0].corrected.conversation_id == conversation_id
     assert [msg.original_message_id for msg in chats[0].corrected.messages] == [
         original_message_ids[1],
         original_message_ids[0],
@@ -140,7 +141,7 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     from custom_components.intentsity.models import Chat, ChatMessage
 
     timestamp = datetime.now(timezone.utc)
-    chat_id = db.insert_chat(
+    conversation_id = db.insert_chat(
         hass,
         Chat(
             created_at=timestamp,
@@ -168,7 +169,7 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
             text="Follow-up",
         ),
     ]
-    db.replace_chat_messages(hass, chat_id, replacement)
+    db.replace_chat_messages(hass, conversation_id, replacement)
 
     chats = db.fetch_recent_chats(hass, 1)
     assert len(chats[0].messages) == 2
@@ -199,7 +200,7 @@ async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -
     from custom_components.intentsity.models import Chat, ChatMessage
 
     timestamp = datetime.now(timezone.utc)
-    chat_id = db.insert_chat(
+    conversation_id_value = db.insert_chat(
         hass,
         Chat(
             created_at=timestamp,
@@ -210,7 +211,7 @@ async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -
             ],
         ),
     )
-    assert chat_id is not None
+    assert conversation_id_value == conversation_id
 
     intent_output = {"response": {"speech": {"plain": {"speech": "Hi"}}}}
     run_debug = PipelineRunDebug()

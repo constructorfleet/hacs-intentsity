@@ -4,7 +4,7 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.dispatcher import async_dispatcher_connect, async_dispatcher_send
 
 from .const import (
     DEFAULT_EVENT_LIMIT,
@@ -12,10 +12,11 @@ from .const import (
     MIN_EVENT_LIMIT,
     SIGNAL_EVENT_RECORDED,
     WS_CMD_LIST_CHATS,
+    WS_CMD_SAVE_CORRECTED_CHAT,
     WS_CMD_SUBSCRIBE_CHATS,
 )
-from .db import fetch_recent_chats
-from .models import ChatListResponse
+from .db import fetch_recent_chats, upsert_corrected_chat
+from .models import ChatListResponse, CorrectedChatSaveRequest
 
 
 _EVENT_LIMIT_SCHEMA = vol.All(
@@ -28,6 +29,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     """Register websocket commands for Intentsity (chat-centric)."""
     websocket_api.async_register_command(hass, websocket_list_chats)
     websocket_api.async_register_command(hass, websocket_subscribe_chats)
+    websocket_api.async_register_command(hass, websocket_save_corrected_chat)
 
 
 
@@ -103,3 +105,30 @@ def websocket_subscribe_chats(
     hass.async_create_task(_push_snapshot())
 
 
+@websocket_api.decorators.websocket_command(
+    {
+        vol.Required("type"): WS_CMD_SAVE_CORRECTED_CHAT,
+        vol.Required("conversation_id"): vol.Coerce(str),
+        vol.Required("messages"): list,
+    }
+)
+@callback
+def websocket_save_corrected_chat(
+    hass: HomeAssistant,
+    connection: websocket_api.connection.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Persist corrected chat messages for a given original chat."""
+    request = CorrectedChatSaveRequest.model_validate(msg)
+
+    async def _save() -> None:
+        await hass.async_add_executor_job(
+            upsert_corrected_chat,
+            hass,
+            request.conversation_id,
+            request.messages,
+        )
+        async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
+        connection.send_result(msg["id"])
+
+    hass.async_create_task(_save())
