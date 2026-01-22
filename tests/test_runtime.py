@@ -8,15 +8,14 @@ from typing import Callable
 import pytest
 from homeassistant.core import HomeAssistant
 
-from custom_components.intentsity import chat_log_callback, db
-from homeassistant.components.conversation.chat_log import (
-    DATA_CHAT_LOGS,
-    AssistantContent,
-    UserContent,
-    async_get_chat_log,
+from custom_components.intentsity import db
+from homeassistant.components.assist_pipeline.pipeline import (
+    KEY_ASSIST_PIPELINE,
+    Pipeline,
+    PipelineEvent,
+    PipelineEventType,
+    PipelineRunDebug,
 )
-from homeassistant.components.conversation.const import ChatLogEventType
-from homeassistant.helpers.chat_session import async_get_chat_session
 
 
 def _setup_fresh_db(hass: HomeAssistant) -> Path:
@@ -177,72 +176,82 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     assert chats[0].messages[0].data["note"] == "corrected"
 
 
+class _PipelineStoreStub:
+    def __init__(self, pipeline: Pipeline) -> None:
+        self.data = {pipeline.id: pipeline}
+
+    def async_get_preferred_item(self) -> str:
+        return next(iter(self.data))
+
+
+class _PipelineDataStub:
+    def __init__(self, pipeline: Pipeline, run_debug: PipelineRunDebug) -> None:
+        self.pipeline_store = _PipelineStoreStub(pipeline)
+        self.pipeline_debug = {pipeline.id: {"run-1": run_debug}}
+
+
 @pytest.mark.asyncio
-async def test_chat_log_callback_snapshots_unknown_conversation(hass: HomeAssistant) -> None:
+async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
 
-    conversation_id = "conv-snapshot"
-    with (
-        async_get_chat_session(hass, conversation_id) as session,
-        async_get_chat_log(hass, session) as chat_log,
-    ):
-        chat_log.async_add_user_content(UserContent(content="Hello"))
-        chat_log.async_add_assistant_content_without_tools(
-            AssistantContent(agent_id="test-agent", content="Hi")
+    conversation_id = "conv-intent-output"
+    from custom_components.intentsity.__init__ import _schedule_intent_output_capture
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    timestamp = datetime.now(timezone.utc)
+    chat_id = db.insert_chat(
+        hass,
+        Chat(
+            created_at=timestamp,
+            conversation_id=conversation_id,
+            messages=[
+                ChatMessage(timestamp=timestamp, sender="user", text="Hello"),
+                ChatMessage(timestamp=timestamp, sender="assistant", text="Hi"),
+            ],
+        ),
+    )
+    assert chat_id is not None
+
+    intent_output = {"response": {"speech": {"plain": {"speech": "Hi"}}}}
+    run_debug = PipelineRunDebug()
+    run_debug.events.append(
+        PipelineEvent(
+            PipelineEventType.RUN_START,
+            {"conversation_id": conversation_id},
         )
-
-    chat_log_callback(
-        hass,
-        conversation_id,
-        ChatLogEventType.CONTENT_ADDED,
-        {"content": {"role": "assistant", "content": "Hi"}},
+    )
+    run_debug.events.append(
+        PipelineEvent(
+            PipelineEventType.INTENT_END,
+            {"intent_output": intent_output},
+        )
     )
 
-    def _has_snapshot() -> bool:
-        chats = db.fetch_recent_chats(hass, 1)
-        return len(chats) == 1 and len(chats[0].messages) >= 2
-
-    await _wait_for(_has_snapshot)
-    chats = db.fetch_recent_chats(hass, 1)
-    assert chats[0].conversation_id == conversation_id
-    texts = [message.text for message in chats[0].messages]
-    assert "Hello" in texts
-    assert "Hi" in texts
-
-
-@pytest.mark.asyncio
-async def test_delta_listener_snapshots_complete_message(hass: HomeAssistant) -> None:
-    _setup_fresh_db(hass)
-
-    conversation_id = "conv-delta"
-    with (
-        async_get_chat_session(hass, conversation_id) as session,
-        async_get_chat_log(hass, session) as chat_log,
-    ):
-        chat_log.async_add_user_content(UserContent(content="Hello"))
-
-    chat_log_callback(
-        hass,
-        conversation_id,
-        ChatLogEventType.CREATED,
-        {"chat_log": chat_log.as_dict()},
+    pipeline = Pipeline(
+        conversation_engine="conversation.home_assistant",
+        conversation_language="en",
+        language="en",
+        name="Test Pipeline",
+        stt_engine=None,
+        stt_language=None,
+        tts_engine=None,
+        tts_language=None,
+        tts_voice=None,
+        wake_word_entity=None,
+        wake_word_id=None,
+        prefer_local_intents=False,
     )
+    hass.data[KEY_ASSIST_PIPELINE] = _PipelineDataStub(pipeline, run_debug)
 
-    await _wait_for(lambda: len(db.fetch_recent_chats(hass, 1)) == 1)
+    _schedule_intent_output_capture(hass, conversation_id)
 
-    chat_logs = hass.data.get(DATA_CHAT_LOGS, {})
-    active_log = chat_logs[conversation_id]
-    active_log.async_add_assistant_content_without_tools(
-        AssistantContent(agent_id="test-agent", content="Streaming done")
-    )
-
-    assert active_log.delta_listener is not None
-    active_log.delta_listener(active_log, {"role": "assistant", "content": "Streaming done"})
-
-    def _has_update() -> bool:
-        chats = db.fetch_recent_chats(hass, 1)
-        if not chats:
+    def _has_intent_output() -> bool:
+        chat = db.fetch_latest_chat_by_conversation_id(hass, conversation_id)
+        if chat is None or not chat.messages:
             return False
-        return any(message.text == "Streaming done" for message in chats[0].messages)
+        for message in reversed(chat.messages):
+            if message.sender == "assistant":
+                return message.data.get("intent_output") == intent_output
+        return False
 
-    await _wait_for(_has_update, timeout=1.0)
+    await _wait_for(_has_intent_output, timeout=1.0)
