@@ -8,6 +8,5 @@ MIN_EVENT_LIMIT = 1
 
 SIGNAL_EVENT_RECORDED = "intentsity_event_recorded"
 
-WS_CMD_LIST_EVENTS = "intentsity/events/list"
-WS_CMD_SUBSCRIBE_EVENTS = "intentsity/events/subscribe"
-WS_CMD_SAVE_REVIEW = "intentsity/review/save"
+WS_CMD_LIST_CHATS = "intentsity/chats/list"
+WS_CMD_SUBSCRIBE_CHATS = "intentsity/chats/subscribe"
