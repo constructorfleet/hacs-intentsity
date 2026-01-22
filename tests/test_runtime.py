@@ -9,7 +9,12 @@ import pytest
 from homeassistant.core import HomeAssistant
 
 from custom_components.intentsity import chat_log_callback, db
-from homeassistant.components.conversation.chat_log import AssistantContent, UserContent, async_get_chat_log
+from homeassistant.components.conversation.chat_log import (
+    DATA_CHAT_LOGS,
+    AssistantContent,
+    UserContent,
+    async_get_chat_log,
+)
 from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.helpers.chat_session import async_get_chat_session
 
@@ -203,3 +208,41 @@ async def test_chat_log_callback_snapshots_unknown_conversation(hass: HomeAssist
     texts = [message.text for message in chats[0].messages]
     assert "Hello" in texts
     assert "Hi" in texts
+
+
+@pytest.mark.asyncio
+async def test_delta_listener_snapshots_complete_message(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+
+    conversation_id = "conv-delta"
+    with (
+        async_get_chat_session(hass, conversation_id) as session,
+        async_get_chat_log(hass, session) as chat_log,
+    ):
+        chat_log.async_add_user_content(UserContent(content="Hello"))
+
+    chat_log_callback(
+        hass,
+        conversation_id,
+        ChatLogEventType.CREATED,
+        {"chat_log": chat_log.as_dict()},
+    )
+
+    await _wait_for(lambda: len(db.fetch_recent_chats(hass, 1)) == 1)
+
+    chat_logs = hass.data.get(DATA_CHAT_LOGS, {})
+    active_log = chat_logs[conversation_id]
+    active_log.async_add_assistant_content_without_tools(
+        AssistantContent(agent_id="test-agent", content="Streaming done")
+    )
+
+    assert active_log.delta_listener is not None
+    active_log.delta_listener(active_log, {"role": "assistant", "content": "Streaming done"})
+
+    def _has_update() -> bool:
+        chats = db.fetch_recent_chats(hass, 1)
+        if not chats:
+            return False
+        return any(message.text == "Streaming done" for message in chats[0].messages)
+
+    await _wait_for(_has_update, timeout=1.0)

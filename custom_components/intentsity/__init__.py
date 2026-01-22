@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 import logging
 from datetime import datetime, timezone
 from random import randint
@@ -7,16 +8,22 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.components.conversation.chat_log import async_get_chat_log, async_subscribe_chat_logs
+from homeassistant.components.conversation.chat_log import (
+    DATA_CHAT_LOGS,
+    ChatLog,
+    async_get_chat_log,
+    async_subscribe_chat_logs,
+)
 from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.http import StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.chat_session import async_get_chat_session
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
-from . import db, websocket
+from . import db, websocket, models
 from .const import DATA_CHAT_MAP, DOMAIN, SIGNAL_EVENT_RECORDED
 
 _LOGGER = logging.getLogger(__name__)
@@ -94,6 +101,98 @@ def _chat_map(hass: HomeAssistant) -> dict[str, int]:
     return chat_map
 
 
+def _delta_handles(hass: HomeAssistant) -> dict[str, Callable[[], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    handles = domain_data.get("delta_handles")
+    if not isinstance(handles, dict):
+        handles = {}
+        domain_data["delta_handles"] = handles
+    return handles
+
+
+def _delta_listeners(hass: HomeAssistant) -> dict[str, Callable[[ChatLog, dict[str, Any]], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    listeners = domain_data.get("delta_listeners")
+    if not isinstance(listeners, dict):
+        listeners = {}
+        domain_data["delta_listeners"] = listeners
+    return listeners
+
+
+def _delta_originals(hass: HomeAssistant) -> dict[str, Callable[[ChatLog, dict[str, Any]], None]]:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    originals = domain_data.get("delta_originals")
+    if not isinstance(originals, dict):
+        originals = {}
+        domain_data["delta_originals"] = originals
+    return originals
+
+
+def _cancel_delta_handle(hass: HomeAssistant, conversation_id: str) -> None:
+    handles = _delta_handles(hass)
+    cancel = handles.pop(conversation_id, None)
+    if cancel is not None:
+        cancel()
+
+
+def _schedule_delta_snapshot(
+    hass: HomeAssistant,
+    conversation_id: str,
+    chat_log: ChatLog,
+) -> None:
+    _cancel_delta_handle(hass, conversation_id)
+
+    async def _fire_snapshot(_: datetime) -> None:
+        _cancel_delta_handle(hass, conversation_id)
+        await _persist_snapshot_from_log(hass, conversation_id, chat_log)
+
+    handles = _delta_handles(hass)
+    handles[conversation_id] = async_call_later(hass, 0.2, _fire_snapshot)
+
+
+def _ensure_delta_listener(hass: HomeAssistant, conversation_id: str) -> None:
+    chat_logs = hass.data.get(DATA_CHAT_LOGS)
+    if not isinstance(chat_logs, dict):
+        return
+    chat_log = chat_logs.get(conversation_id)
+    if chat_log is None:
+        return
+
+    listeners = _delta_listeners(hass)
+    if conversation_id in listeners:
+        return
+
+    existing = getattr(chat_log, "delta_listener", None)
+
+    def _listener(log: ChatLog, delta: dict[str, Any]) -> None:
+        if existing is not None:
+            existing(log, delta)
+        _schedule_delta_snapshot(hass, conversation_id, log)
+
+    listeners[conversation_id] = _listener
+    if existing is not None:
+        _delta_originals(hass)[conversation_id] = existing
+    chat_log.delta_listener = _listener
+
+
+def _clear_delta_listener(hass: HomeAssistant, conversation_id: str) -> None:
+    chat_logs = hass.data.get(DATA_CHAT_LOGS)
+    if not isinstance(chat_logs, dict):
+        return
+    chat_log = chat_logs.get(conversation_id)
+    if chat_log is None:
+        return
+
+    listeners = _delta_listeners(hass)
+    listener = listeners.pop(conversation_id, None)
+    if listener is None:
+        return
+
+    original = _delta_originals(hass).pop(conversation_id, None)
+    if getattr(chat_log, "delta_listener", None) is listener:
+        chat_log.delta_listener = original
+
+
 def _extract_chat_log_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     chat_log_payload = data.get("chat_log")
     if isinstance(chat_log_payload, dict):
@@ -111,6 +210,44 @@ def _fetch_chat_log_snapshot(hass: HomeAssistant, conversation_id: str) -> dict[
         return chat_log.as_dict()
 
 
+async def _persist_snapshot_from_log(
+    hass: HomeAssistant,
+    conversation_id: str,
+    chat_log: ChatLog,
+) -> None:
+    chat_map = _chat_map(hass)
+    target_chat_id = chat_map.get(conversation_id)
+    if target_chat_id is None:
+        existing = await hass.async_add_executor_job(
+            db.fetch_latest_chat_by_conversation_id,
+            hass,
+            conversation_id,
+        )
+        if existing is not None:
+            target_chat_id = existing.id
+            if target_chat_id is not None:
+                chat_map[conversation_id] = target_chat_id
+
+    messages = _messages_from_chat_log(chat_log.as_dict())
+    if target_chat_id is None:
+        new_chat = models.Chat(
+            created_at=messages[0].timestamp if messages else datetime.now(timezone.utc),
+            conversation_id=conversation_id,
+            messages=messages,
+        )
+        target_chat_id = await hass.async_add_executor_job(db.insert_chat, hass, new_chat)
+        if target_chat_id is not None:
+            chat_map[conversation_id] = target_chat_id
+    elif messages:
+        await hass.async_add_executor_job(
+            db.replace_chat_messages,
+            hass,
+            target_chat_id,
+            messages,
+        )
+    async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
@@ -123,10 +260,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-
+@callback
 def chat_log_callback(hass: HomeAssistant, conversation_id: str, event_type: ChatLogEventType, data: dict[str, Any]) -> None:
     # Receive chat log events from Home Assistant's conversation integration
-    _LOGGER.info("Chat event: %s %s %s", conversation_id, event_type, data)
+    _LOGGER.warning("Chat event: %s %s %s", conversation_id, event_type, data)
 
     handled_events = {
         ChatLogEventType.CONTENT_ADDED,
@@ -139,8 +276,14 @@ def chat_log_callback(hass: HomeAssistant, conversation_id: str, event_type: Cha
         handled_events.add(_CONTENT_UPDATED_EVENT)
 
     if event_type not in handled_events:
-        _LOGGER.warning(f"Skipping event type: {event_type} {data}")
-        return
+        if event_type == ChatLogEventType.DELETED:
+            event_type = ChatLogEventType.UPDATED
+            chat_logs = hass.data.get(DATA_CHAT_LOGS, {})
+            if conversation_id in chat_logs:
+                data = chat_logs[conversation_id].as_dict()
+        else:
+            _LOGGER.warning(f"Skipping event type: {event_type} {data}")
+            return
 
     from .models import ChatMessage, Chat
     
@@ -151,70 +294,69 @@ def chat_log_callback(hass: HomeAssistant, conversation_id: str, event_type: Cha
         ChatLogEventType.INITIAL_STATE,
     } or (_CONTENT_UPDATED_EVENT is not None and event_type == _CONTENT_UPDATED_EVENT)
 
-    # In a real setup, we might want to map conversation_id to an existing Chat record
-    # For simplicity, we'll try to find a recent chat with this conversation_id or create a new one
-    # But since this is a callback (sync), we need to use a task or executor for DB work
-    from . import db
+    if event_type == ChatLogEventType.CREATED:
+        _ensure_delta_listener(hass, conversation_id)
 
-    # This is a bit complex for a callback. Let's run it in a task.
-    async def _persist() -> None:
-        chat_map = _chat_map(hass)
-        target_chat_id = chat_map.get(conversation_id)
+    hass.async_create_task(_persist(hass, conversation_id, event_type, data, chat_log_payload, update_event))
+    
+
+async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLogEventType, data: dict[str, Any], chat_log_payload: dict[str, Any] | None, update_event: bool) -> None:
+    chat_map = _chat_map(hass)
+    target_chat_id = chat_map.get(conversation_id)
+    if target_chat_id is None:
+        existing = await hass.async_add_executor_job(
+            db.fetch_latest_chat_by_conversation_id,
+            hass,
+            conversation_id,
+        )
+        if existing is not None:
+            target_chat_id = existing.id
+            if target_chat_id is not None:
+                chat_map[conversation_id] = target_chat_id
+
+    if event_type == ChatLogEventType.DELETED:
+        chat_map.pop(conversation_id, None)
+        _clear_delta_listener(hass, conversation_id)
+        _cancel_delta_handle(hass, conversation_id)
+        return
+
+    if update_event or target_chat_id is None:
+        snapshot_payload = chat_log_payload
+        if snapshot_payload is None:
+            snapshot_payload = _fetch_chat_log_snapshot(hass, conversation_id)
+        messages = _messages_from_chat_log(snapshot_payload) if snapshot_payload else []
         if target_chat_id is None:
-            existing = await hass.async_add_executor_job(
-                db.fetch_latest_chat_by_conversation_id,
-                hass,
-                conversation_id,
+            new_chat = models.Chat(
+                created_at=messages[0].timestamp if messages else datetime.now(timezone.utc),
+                conversation_id=conversation_id,
+                messages=messages,
             )
-            if existing is not None:
-                target_chat_id = existing.id
-                if target_chat_id is not None:
-                    chat_map[conversation_id] = target_chat_id
-
-        if event_type == ChatLogEventType.DELETED:
-            chat_map.pop(conversation_id, None)
-            return
-
-        if update_event or target_chat_id is None:
-            snapshot_payload = chat_log_payload
-            if snapshot_payload is None:
-                snapshot_payload = _fetch_chat_log_snapshot(hass, conversation_id)
-            messages = _messages_from_chat_log(snapshot_payload) if snapshot_payload else []
-            if target_chat_id is None:
-                new_chat = Chat(
-                    created_at=messages[0].timestamp if messages else datetime.now(timezone.utc),
-                    conversation_id=conversation_id,
-                    messages=messages,
-                )
-                target_chat_id = await hass.async_add_executor_job(db.insert_chat, hass, new_chat)
-                if target_chat_id is not None:
-                    chat_map[conversation_id] = target_chat_id
-            elif messages:
-                await hass.async_add_executor_job(
-                    db.replace_chat_messages,
-                    hass,
-                    target_chat_id,
-                    messages,
-                )
-        else:
-            sender, text, timestamp, message_data = _extract_message_payload(data)
-            message = ChatMessage(
-                timestamp=timestamp,
-                sender=sender,
-                text=text,
-                data=message_data,
-            )
+            target_chat_id = await hass.async_add_executor_job(db.insert_chat, hass, new_chat)
+            if target_chat_id is not None:
+                chat_map[conversation_id] = target_chat_id
+        elif messages:
             await hass.async_add_executor_job(
-                db.insert_chat_message,
+                db.replace_chat_messages,
                 hass,
                 target_chat_id,
-                message,
+                messages,
             )
+    else:
+        sender, text, timestamp, message_data = _extract_message_payload(data)
+        message = models.ChatMessage(
+            timestamp=timestamp,
+            sender=sender,
+            text=text,
+            data=message_data,
+        )
+        await hass.async_add_executor_job(
+            db.insert_chat_message,
+            hass,
+            target_chat_id,
+            message,
+        )
 
-        async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
-
-    hass.async_create_task(_persist())
-
+    async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -260,12 +402,6 @@ async def _async_initialize(hass: HomeAssistant) -> None:
             require_admin=True,
         )
         domain_data[DATA_API_REGISTERED] = True
-
-
-
-
-
-
 
 
 
