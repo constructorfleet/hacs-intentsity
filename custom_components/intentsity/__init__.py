@@ -261,7 +261,7 @@ async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLo
                 conversation_id=conversation_id,
                 messages=messages,
             )
-            await hass.async_add_executor_job(db.insert_chat, hass, new_chat)
+            await hass.async_add_executor_job(db.upsert_chat, hass, new_chat)
         elif messages:
             await hass.async_add_executor_job(
                 db.replace_chat_messages,
@@ -278,7 +278,7 @@ async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLo
             data=message_data,
         )
         await hass.async_add_executor_job(
-            db.insert_chat_message,
+            db.upsert_chat_message,
             hass,
             target_chat_id,
             message,

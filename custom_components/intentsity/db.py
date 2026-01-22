@@ -306,16 +306,21 @@ class IntentsityDBClient:
 
 
     # New chat persistence methods
-    def insert_chat(self, chat: Chat) -> str:
+    def upsert_chat(self, chat: Chat) -> str:
         engine = self._get_engine()
         with Session(engine) as session:
-            chat_row = ChatRow(
-                created_at=chat.created_at,
-                conversation_id=chat.conversation_id,
-            )
-            session.add(chat_row)
+            chat_row = session.get(ChatRow, chat.conversation_id)
+            if chat_row is None:
+                chat_row = ChatRow(
+                    created_at=chat.created_at,
+                    conversation_id=chat.conversation_id,
+                )
+                session.add(chat_row)
+            else:
+                chat_row.created_at = chat.created_at
             for index, msg in enumerate(chat.messages):
                 msg_row = ChatMessageRow(
+                    id=msg.id,
                     chat_id=chat_row.conversation_id,
                     position=msg.position if msg.position is not None else index,
                     timestamp=msg.timestamp,
@@ -323,11 +328,11 @@ class IntentsityDBClient:
                     text=msg.text,
                     data=_json_dumps(msg.data) if msg.data else None,
                 )
-                session.add(msg_row)
+                session.merge(msg_row)
             session.commit()
             return chat_row.conversation_id
 
-    def insert_chat_message(self, chat_id: str, message: ChatMessage) -> int:
+    def upsert_chat_message(self, chat_id: str, message: ChatMessage) -> int:
         engine = self._get_engine()
         with Session(engine) as session:
             position = message.position
@@ -337,6 +342,7 @@ class IntentsityDBClient:
                 )
                 position = (max_position or 0) + 1
             msg_row = ChatMessageRow(
+                id=message.id,
                 chat_id=chat_id,
                 position=position,
                 timestamp=message.timestamp,
@@ -344,9 +350,9 @@ class IntentsityDBClient:
                 text=message.text,
                 data=_json_dumps(message.data) if message.data else None,
             )
-            session.add(msg_row)
+            merged = session.merge(msg_row)
             session.commit()
-            return msg_row.id
+            return merged.id
 
     def replace_chat_messages(self, chat_id: str, messages: list[ChatMessage]) -> None:
         engine = self._get_engine()
@@ -491,11 +497,11 @@ def init_db(hass: HomeAssistant) -> None:
 
 
 
-def insert_chat(hass: HomeAssistant, chat: Chat) -> str:
-    return _get_client(hass).insert_chat(chat)
+def upsert_chat(hass: HomeAssistant, chat: Chat) -> str:
+    return _get_client(hass).upsert_chat(chat)
 
-def insert_chat_message(hass: HomeAssistant, chat_id: str, message: ChatMessage) -> int:
-    return _get_client(hass).insert_chat_message(chat_id, message)
+def upsert_chat_message(hass: HomeAssistant, chat_id: str, message: ChatMessage) -> int:
+    return _get_client(hass).upsert_chat_message(chat_id, message)
 
 
 def replace_chat_messages(hass: HomeAssistant, chat_id: str, messages: list[ChatMessage]) -> None:

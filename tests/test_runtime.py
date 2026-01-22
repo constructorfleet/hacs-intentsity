@@ -45,7 +45,7 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
     # Let's test the DB logic directly through the helper
     from custom_components.intentsity.models import Chat, ChatMessage
 
-    conversation_id = db.insert_chat(
+    conversation_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
@@ -60,7 +60,7 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
         ),
     )
 
-    db.insert_chat_message(
+    db.upsert_chat_message(
         hass,
         conversation_id,
         ChatMessage(
@@ -83,7 +83,7 @@ async def test_corrected_chat_persists_with_reordered_messages(hass: HomeAssista
     _setup_fresh_db(hass)
     from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
 
-    conversation_id = db.insert_chat(
+    conversation_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
@@ -141,7 +141,7 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     from custom_components.intentsity.models import Chat, ChatMessage
 
     timestamp = datetime.now(timezone.utc)
-    conversation_id = db.insert_chat(
+    conversation_id = db.upsert_chat(
         hass,
         Chat(
             created_at=timestamp,
@@ -200,7 +200,7 @@ async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -
     from custom_components.intentsity.models import Chat, ChatMessage
 
     timestamp = datetime.now(timezone.utc)
-    conversation_id_value = db.insert_chat(
+    conversation_id_value = db.upsert_chat(
         hass,
         Chat(
             created_at=timestamp,
