@@ -26,7 +26,7 @@ blueprints/
 tts/
 deps/
 .HA_VERSION
-
+.ha_run.lock
 # Node
 node_modules/
 
