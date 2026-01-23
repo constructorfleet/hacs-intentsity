@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 import logging
 from datetime import datetime, timezone
 from random import randint
@@ -80,6 +81,8 @@ def _messages_from_chat_log(chat_log: dict[str, Any]) -> list[Any]:
         if not isinstance(item, dict):
             continue
         sender, text, timestamp, message_data = _extract_message_payload({"content": item})
+        if not text.strip():
+            continue
         messages.append(
             ChatMessage(
                 position=index,
@@ -130,6 +133,37 @@ def _extract_chat_log_payload(data: dict[str, Any]) -> dict[str, Any] | None:
     if isinstance(data.get("content"), list):
         return {"content": data["content"]}
     return None
+
+
+def _intent_output_speech(intent_output: dict[str, Any]) -> str | None:
+    response = intent_output.get("response")
+    if not isinstance(response, dict):
+        return None
+    speech = response.get("speech")
+    if not isinstance(speech, dict):
+        return None
+    plain = speech.get("plain")
+    if not isinstance(plain, dict):
+        return None
+    text = plain.get("speech")
+    if isinstance(text, str) and text.strip():
+        return text
+    return None
+
+
+def _intent_output_targets(intent_output: dict[str, Any]) -> dict[str, Any] | None:
+    response = intent_output.get("response")
+    if not isinstance(response, dict):
+        return None
+    data = response.get("data")
+    if not isinstance(data, dict):
+        return None
+    targets = data.get("targets") or []
+    success = data.get("success") or []
+    failed = data.get("failed") or []
+    if not (targets or success or failed):
+        return None
+    return {"targets": targets, "success": success, "failed": failed}
 
 
 def _fetch_chat_log_snapshot(hass: HomeAssistant, conversation_id: str) -> dict[str, Any]:
@@ -197,35 +231,39 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
     )
     if chat is None or not chat.messages:
         return
+    speech_text = _intent_output_speech(intent_output)
+    targets_payload = _intent_output_targets(intent_output)
 
-    target_index = None
-    for index in range(len(chat.messages) - 1, -1, -1):
-        if chat.messages[index].sender == "assistant":
-            target_index = index
-            break
-    if target_index is None:
-        target_index = len(chat.messages) - 1
-
-    message = chat.messages[target_index]
-    updated_data = dict(message.data)
-    if updated_data.get("intent_output") == intent_output:
-        _LOGGER.debug("Intent output already up to date for conversation_id=%s", conversation_id)
+    if speech_text is None and targets_payload is None:
         return
-    updated_data["intent_output"] = intent_output
 
-    chat.messages[target_index] = models.ChatMessage.model_validate(
-        {
-            **message.model_dump(),
-            "data": updated_data,
-        }
-    )
+    if targets_payload is not None:
+        tool_result = {"tool_result": targets_payload, "intent_output": intent_output}
+        tool_text = json.dumps(targets_payload, ensure_ascii=True)
+        if tool_text.strip():
+            await hass.async_add_executor_job(
+                db.upsert_chat_message,
+                hass,
+                chat.conversation_id,
+                models.ChatMessage(
+                    sender="tool_result",
+                    text=tool_text,
+                    data=tool_result,
+                ),
+            )
 
-    await hass.async_add_executor_job(
-        db.replace_chat_messages,
-        hass,
-        chat.conversation_id,
-        chat.messages,
-    )
+    if speech_text is not None:
+        await hass.async_add_executor_job(
+            db.upsert_chat_message,
+            hass,
+            chat.conversation_id,
+            models.ChatMessage(
+                sender="assistant",
+                text=speech_text,
+                data={"intent_output": intent_output},
+            ),
+        )
+
     async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
 
 
@@ -271,6 +309,8 @@ async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLo
             )
     else:
         sender, text, timestamp, message_data = _extract_message_payload(data)
+        if not text.strip():
+            return
         message = models.ChatMessage(
             timestamp=timestamp,
             sender=sender,
