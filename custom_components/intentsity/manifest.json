@@ -10,7 +10,10 @@
         "sqlalchemy>=2.0.0",
         "voluptuous>=0.13.1"
     ],
-    "dependencies": [],
+    "dependencies": [
+        "assist_pipeline",
+        "http"
+    ],
     "codeowners": [
         "@teagan42"
     ],
