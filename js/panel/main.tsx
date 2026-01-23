@@ -252,6 +252,9 @@ class IntentsityChatList extends LitElement {
     @state() private errors: Record<string, string | undefined> = {};
     @state() private saving: Record<string, boolean> = {};
     @state() private expanded: Record<string, boolean> = {};
+    @state() private correctedOverrides: Record<string, string> = {};
+    @state() private toastMessage: string | null = null;
+    @state() private toastKind: "success" | "error" = "success";
     @state() private dialogOpen = false;
     @state() private dialogchatId: string | null = null;
     @state() private dialogIndex: number | null = null;
@@ -403,6 +406,26 @@ class IntentsityChatList extends LitElement {
             .dialog-body {
                 min-height: 60vh;
             }
+            .corrected-card {
+                border-left: 4px solid var(--success-color, #2e7d32);
+            }
+            .toast {
+                position: fixed;
+                right: 24px;
+                bottom: 24px;
+                padding: 12px 16px;
+                border-radius: 8px;
+                color: #fff;
+                box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+                z-index: 20;
+                max-width: 320px;
+            }
+            .toast.success {
+                background: var(--success-color, #2e7d32);
+            }
+            .toast.error {
+                background: var(--error-color, #c62828);
+            }
         `
     ];
 
@@ -457,6 +480,51 @@ class IntentsityChatList extends LitElement {
         });
         this.drafts = updatedDrafts;
         this.expanded = updatedExpanded;
+    }
+
+    private getCorrectedAt(chat: Chat): string | undefined {
+        return this.correctedOverrides[chat.conversation_id] ?? chat.corrected?.updated_at;
+    }
+
+    private showToast(message: string, kind: "success" | "error") {
+        this.toastMessage = message;
+        this.toastKind = kind;
+        window.clearTimeout((this as any)._toastTimer);
+        (this as any)._toastTimer = window.setTimeout(() => {
+            this.toastMessage = null;
+        }, 3000);
+    }
+
+    private focusChat(chatId: string) {
+        const card = this.renderRoot.querySelector(`ha-card[data-chat-id="${chatId}"]`) as HTMLElement | null;
+        if (!card) {
+            return;
+        }
+        card.scrollIntoView({ behavior: "smooth", block: "center" });
+        const button = card.querySelector("ha-button");
+        if (button) {
+            (button as HTMLElement).focus();
+        }
+    }
+
+    private markCorrectedAndAdvance(chatId: string) {
+        const correctedAt = new Date().toISOString();
+        this.correctedOverrides = { ...this.correctedOverrides, [chatId]: correctedAt };
+        const nextChat = this.chats.find((chat) => {
+            if (chat.conversation_id === chatId) {
+                return false;
+            }
+            return !this.getCorrectedAt(chat);
+        });
+        const nextId = nextChat?.conversation_id;
+        this.expanded = {
+            ...this.expanded,
+            [chatId]: false,
+            ...(nextId ? { [nextId]: true } : {}),
+        };
+        if (nextId) {
+            requestAnimationFrame(() => this.focusChat(nextId));
+        }
     }
 
     private updateDraft(chatId: string, index: number, update: Partial<DraftMessage>): void {
@@ -538,6 +606,11 @@ class IntentsityChatList extends LitElement {
         this.saving = { ...this.saving, [chatId]: true };
         try {
             await this.onSaveCorrected(chatId, parsed);
+            this.showToast("Corrected conversation saved.", "success");
+            this.markCorrectedAndAdvance(chatId);
+        } catch (error) {
+            this.errors = { ...this.errors, [chatId]: "Failed to save corrected conversation." };
+            this.showToast("Failed to save corrected conversation.", "error");
         } finally {
             this.saving = { ...this.saving, [chatId]: false };
         }
@@ -626,8 +699,10 @@ class IntentsityChatList extends LitElement {
                     const chatId = chat.conversation_id;
                     const isExpanded = this.expanded[chatId] ?? false;
                     const preview = this.getFirstUserSnippet(chat);
+                    const correctedAt = this.getCorrectedAt(chat);
+                    const isCorrected = Boolean(correctedAt);
                     return html`
-                    <ha-card>
+                    <ha-card class=${isCorrected ? "corrected-card" : ""} data-chat-id=${chatId}>
                         <div class="card-content">
                             <div class="chat-header">
                                 <div class="header-row">
@@ -639,9 +714,9 @@ class IntentsityChatList extends LitElement {
                                         <ha-assist-chip label="Conversation ${chat.conversation_id}" hasIcon>
                                             <ha-icon slot="icon" icon="mdi:conversation"></ha-icon>
                                         </ha-assist-chip>
-                                        ${chat.corrected?.updated_at
+                                        ${isCorrected
                                             ? html`
-                                                  <ha-assist-chip label="Corrected ${formatTimestamp(chat.corrected.updated_at)}" hasIcon>
+                                                  <ha-assist-chip label="Corrected ${formatTimestamp(correctedAt!)}" hasIcon>
                                                       <ha-icon slot="icon" icon="mdi:check-circle"></ha-icon>
                                                   </ha-assist-chip>
                                               `
@@ -764,6 +839,13 @@ class IntentsityChatList extends LitElement {
                 `;
                 })}
             </div>
+            ${this.toastMessage
+                ? html`
+                      <div class="toast ${this.toastKind}">
+                          ${this.toastMessage}
+                      </div>
+                  `
+                : nothing}
             <ha-dialog
                 .open=${this.dialogOpen}
                 @closed=${this.closeDialog}
