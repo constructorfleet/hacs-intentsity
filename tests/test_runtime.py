@@ -56,10 +56,6 @@ def test_messages_from_chat_log_skips_empty_content() -> None:
 async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
 
-    # Simulate a chat log entry
-    # Note: Using the event names we found in HASS
-
-    # Let's test the DB logic directly through the helper
     from custom_components.intentsity.models import Chat, ChatMessage
 
     conversation_id = db.upsert_chat(
