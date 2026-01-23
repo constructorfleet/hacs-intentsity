@@ -3,6 +3,8 @@ DOMAIN = "intentsity"
 DB_NAME = "intentsity.db"
 DB_SCHEMA_VERSION = 3
 
+COORDINATOR_KEY = "coordinator"
+
 DEFAULT_EVENT_LIMIT = 100
 MAX_EVENT_LIMIT = 500
 MIN_EVENT_LIMIT = 1

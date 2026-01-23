@@ -20,13 +20,15 @@ from homeassistant.components.conversation.const import ChatLogEventType
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.components.http import StaticPathConfig
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.chat_session import async_get_chat_session
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 from . import db, websocket, models
-from .const import DATA_UNSUBSCRIBE, DATA_API_REGISTERED, DATA_DB_INITIALIZED, DOMAIN, SIGNAL_EVENT_RECORDED
+from .const import COORDINATOR_KEY, DATA_UNSUBSCRIBE, DATA_API_REGISTERED, DATA_DB_INITIALIZED, DOMAIN, SIGNAL_EVENT_RECORDED
+from .coordinator import IntentsityCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 CONFIG_SCHEMA = vol.Schema(
@@ -37,6 +39,7 @@ CONFIG_SCHEMA = vol.Schema(
 )
 
 _CONTENT_UPDATED_EVENT = getattr(ChatLogEventType, "CONTENT_UPDATED", None)
+PLATFORMS = [Platform.SENSOR]
 
 
 def _parse_timestamp(value: Any) -> datetime:
@@ -316,6 +319,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_initialize(hass)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True    
     
 
@@ -370,6 +374,7 @@ async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLo
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     await hass.async_add_executor_job(db.dispose_client, hass)
     domain_data = hass.data.pop(DOMAIN, {})
     if DATA_UNSUBSCRIBE in domain_data:
@@ -423,6 +428,10 @@ async def _async_initialize(hass: HomeAssistant) -> None:
     if not domain_data.get(DATA_UNSUBSCRIBE, False):
         unsubscribe = async_subscribe_chat_logs(hass, on_chat_log_event)
         domain_data[DATA_UNSUBSCRIBE] = unsubscribe
+    if COORDINATOR_KEY not in domain_data:
+        coordinator = IntentsityCoordinator(hass)
+        domain_data[COORDINATOR_KEY] = coordinator
+        await coordinator.async_config_entry_first_refresh()
 
     if not domain_data.get(DATA_API_REGISTERED, False):
         websocket.async_register_commands(hass)

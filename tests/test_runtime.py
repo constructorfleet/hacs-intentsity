@@ -195,6 +195,40 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.asyncio
+async def test_count_uncorrected_chats(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+
+    conversation_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=datetime.now(timezone.utc),
+            conversation_id="conv-count",
+            messages=[
+                ChatMessage(
+                    timestamp=datetime.now(timezone.utc),
+                    sender="user",
+                    text="Hello",
+                )
+            ],
+        ),
+    )
+    assert db.count_uncorrected_chats(hass) == 1
+
+    original = db.fetch_recent_chats(hass, 1)[0]
+    corrected_messages = [
+        CorrectedChatMessage(
+            original_message_id=original.messages[0].id,
+            timestamp=datetime.now(timezone.utc),
+            sender="assistant",
+            text="Fixed",
+        )
+    ]
+    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+    assert db.count_uncorrected_chats(hass) == 0
+
+
+@pytest.mark.asyncio
 async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
     from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage

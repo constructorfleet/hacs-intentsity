@@ -8,6 +8,7 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Uses the official `async_subscribe_chat_logs` API for non-invasive, observational logging.
 - Exposes a WebSocket API for listing recent chats and subscribing to live updates.
 - Ships a modern, responsive LitElement-based panel for reviewing and correcting conversation history.
+- Provides a sensor for the number of uncorrected conversations.
 
 ## Installation
 1. Copy the `custom_components/intentsity` folder into your Home Assistant `config/custom_components` directory.
