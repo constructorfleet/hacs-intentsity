@@ -194,6 +194,77 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     assert chats[0].messages[0].data["note"] == "corrected"
 
 
+@pytest.mark.asyncio
+async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+
+    conversation_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=datetime.now(timezone.utc),
+            conversation_id="conv-delete",
+            messages=[
+                ChatMessage(
+                    timestamp=datetime.now(timezone.utc),
+                    sender="user",
+                    text="Hello",
+                )
+            ],
+        ),
+    )
+    original = db.fetch_recent_chats(hass, 1)[0]
+    corrected_messages = [
+        CorrectedChatMessage(
+            original_message_id=original.messages[0].id,
+            timestamp=datetime.now(timezone.utc),
+            sender="assistant",
+            text="Fixed",
+        )
+    ]
+    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+
+    db.delete_chat(hass, conversation_id)
+
+    chats = db.fetch_recent_chats(hass, 10)
+    assert not chats
+
+
+@pytest.mark.asyncio
+async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+
+    conversation_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=datetime.now(timezone.utc),
+            conversation_id="conv-corrected-delete",
+            messages=[
+                ChatMessage(
+                    timestamp=datetime.now(timezone.utc),
+                    sender="user",
+                    text="Hello",
+                )
+            ],
+        ),
+    )
+    original = db.fetch_recent_chats(hass, 1)[0]
+    corrected_messages = [
+        CorrectedChatMessage(
+            original_message_id=original.messages[0].id,
+            timestamp=datetime.now(timezone.utc),
+            sender="assistant",
+            text="Fixed",
+        )
+    ]
+    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+
+    db.delete_corrected_chat(hass, conversation_id)
+
+    chats = db.fetch_recent_chats(hass, 1)
+    assert chats[0].corrected is None
+
 class _PipelineStoreStub:
     def __init__(self, pipeline: Pipeline) -> None:
         self.data = {pipeline.id: pipeline}

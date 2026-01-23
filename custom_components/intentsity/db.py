@@ -448,6 +448,23 @@ class IntentsityDBClient:
             return None
         return _row_to_chat(row)
 
+    def delete_chat(self, conversation_id: str) -> None:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            chat_row = session.get(ChatRow, conversation_id)
+            if chat_row is None:
+                return
+            session.delete(chat_row)
+            session.commit()
+
+    def delete_corrected_chat(self, conversation_id: str) -> None:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            corrected_row = session.get(CorrectedChatRow, conversation_id)
+            if corrected_row is None:
+                return
+            session.delete(corrected_row)
+            session.commit()
 
     def dispose(self) -> None:
         if self._engine is not None:
@@ -525,6 +542,14 @@ def upsert_corrected_chat(
     hass: HomeAssistant, original_conversation_id: str, messages: list[CorrectedChatMessage]
 ) -> str:
     return _get_client(hass).upsert_corrected_chat(original_conversation_id, messages)
+
+
+def delete_chat(hass: HomeAssistant, conversation_id: str) -> None:
+    return _get_client(hass).delete_chat(conversation_id)
+
+
+def delete_corrected_chat(hass: HomeAssistant, conversation_id: str) -> None:
+    return _get_client(hass).delete_corrected_chat(conversation_id)
 
 
 def _row_to_chat(row: ChatRow) -> Chat:
