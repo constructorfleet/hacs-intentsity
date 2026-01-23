@@ -17,7 +17,7 @@ from custom_components.intentsity.coordinator import (
     IntentsityCoordinator,
     _process_intent_progress,
     _process_intent_start,
-    _process_run_satart,
+    _process_run_start,
 )
 from custom_components.intentsity.models import Chat
 
@@ -53,7 +53,7 @@ def test_process_run_start() -> None:
         PipelineEventType.RUN_START,
         {"conversation_id": "conv-1"},
     )
-    chat = _process_run_satart(event)
+    chat = _process_run_start(event)
     assert chat is not None
     assert chat.conversation_id == "conv-1"
 

@@ -34,7 +34,7 @@ HANDLED_PIPELINE_EVENTS = {
 }
 
 
-def _process_run_satart(event: PipelineEvent) -> Chat | None:
+def _process_run_start(event: PipelineEvent) -> Chat | None:
     if not event.data:
         return None
     conversation_id = event.data.get("conversation_id", "")
@@ -138,7 +138,7 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if event.type in HANDLED_PIPELINE_EVENTS
         ]:
             if event.type == PipelineEventType.RUN_START:
-                chat = _process_run_satart(event)
+                chat = _process_run_start(event)
             else:
                 if not chat:
                     return None
