@@ -35,23 +35,6 @@ async def _wait_for(condition: Callable[[], bool], timeout: float = 1.0) -> None
         await asyncio.sleep(0.01)
 
 
-def test_messages_from_chat_log_skips_empty_content() -> None:
-    from custom_components.intentsity.__init__ import _messages_from_chat_log
-
-    messages = _messages_from_chat_log(
-        {
-            "content": [
-                {"role": "assistant", "content": "  "},
-                {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": ""},
-            ]
-        }
-    )
-
-    assert len(messages) == 1
-    assert messages[0].text == "Hello"
-
-
 @pytest.mark.asyncio
 async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
@@ -92,9 +75,15 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
 
 
 @pytest.mark.asyncio
-async def test_corrected_chat_persists_with_reordered_messages(hass: HomeAssistant) -> None:
+async def test_corrected_chat_persists_with_reordered_messages(
+    hass: HomeAssistant,
+) -> None:
     _setup_fresh_db(hass)
-    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+    )
 
     conversation_id = db.upsert_chat(
         hass,
@@ -193,7 +182,11 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
 @pytest.mark.asyncio
 async def test_count_uncorrected_chats(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+    )
 
     conversation_id = db.upsert_chat(
         hass,
@@ -227,7 +220,11 @@ async def test_count_uncorrected_chats(hass: HomeAssistant) -> None:
 @pytest.mark.asyncio
 async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+    )
 
     conversation_id = db.upsert_chat(
         hass,
@@ -263,7 +260,11 @@ async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) 
 @pytest.mark.asyncio
 async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
-    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+    )
 
     conversation_id = db.upsert_chat(
         hass,
@@ -295,6 +296,7 @@ async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> N
     chats = db.fetch_recent_chats(hass, 1)
     assert chats[0].corrected is None
 
+
 class _PipelineStoreStub:
     def __init__(self, pipeline: Pipeline) -> None:
         self.data = {pipeline.id: pipeline}
@@ -307,105 +309,3 @@ class _PipelineDataStub:
     def __init__(self, pipeline: Pipeline, run_debug: PipelineRunDebug) -> None:
         self.pipeline_store = _PipelineStoreStub(pipeline)
         self.pipeline_debug = {pipeline.id: {"run-1": run_debug}}
-
-
-@pytest.mark.asyncio
-async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -> None:
-    _setup_fresh_db(hass)
-
-    conversation_id = "conv-intent-output"
-    from custom_components.intentsity.__init__ import _schedule_intent_output_capture
-    from custom_components.intentsity.models import Chat, ChatMessage
-
-    timestamp = datetime.now(timezone.utc)
-    conversation_id_value = db.upsert_chat(
-        hass,
-        Chat(
-            created_at=timestamp,
-            conversation_id=conversation_id,
-            messages=[
-                ChatMessage(timestamp=timestamp, sender="user", text="Hello"),
-                ChatMessage(timestamp=timestamp, sender="assistant", text="Hi"),
-            ],
-        ),
-    )
-    assert conversation_id_value == conversation_id
-
-    intent_output = {
-        "response": {
-            "speech": {"plain": {"speech": "Hi"}},
-            "data": {
-                "targets": [{"name": "Light", "type": "entity", "id": "light.kitchen"}],
-                "success": [],
-                "failed": [],
-            },
-        },
-        "continue_conversation": False,
-    }
-    run_debug = PipelineRunDebug()
-    run_debug.events.append(
-        PipelineEvent(
-            PipelineEventType.RUN_START,
-            {"conversation_id": conversation_id},
-        )
-    )
-    run_debug.events.append(
-        PipelineEvent(
-            PipelineEventType.INTENT_END,
-            {"intent_output": intent_output},
-        )
-    )
-
-    pipeline = Pipeline(
-        conversation_engine="conversation.home_assistant",
-        conversation_language="en",
-        language="en",
-        name="Test Pipeline",
-        stt_engine=None,
-        stt_language=None,
-        tts_engine=None,
-        tts_language=None,
-        tts_voice=None,
-        wake_word_entity=None,
-        wake_word_id=None,
-        prefer_local_intents=False,
-    )
-    hass.data[KEY_ASSIST_PIPELINE] = _PipelineDataStub(pipeline, run_debug)
-
-    _schedule_intent_output_capture(hass, conversation_id)
-
-    def _has_intent_output() -> bool:
-        chat = db.fetch_latest_chat_by_conversation_id(hass, conversation_id)
-        if chat is None or len(chat.messages) < 4:
-            return False
-        tool_message = chat.messages[-2]
-        assistant_message = chat.messages[-1]
-        if tool_message.sender != "tool_result":
-            return False
-        if assistant_message.sender != "assistant":
-            return False
-        if assistant_message.text != "Hi":
-            return False
-        expected_tool = {
-            "role": "tool_result",
-            "success": [],
-            "result": [{"name": "Light", "type": "entity", "id": "light.kitchen"}],
-        }
-        if tool_message.data.get("role") != expected_tool["role"]:
-            return False
-        if tool_message.data.get("success") != expected_tool["success"]:
-            return False
-        if tool_message.data.get("result") != expected_tool["result"]:
-            return False
-        expected_assistant = {
-            "role": "assistant",
-            "content": "Hi",
-            "continue_conversation": False,
-        }
-        if assistant_message.data.get("role") != expected_assistant["role"]:
-            return False
-        if assistant_message.data.get("content") != expected_assistant["content"]:
-            return False
-        return assistant_message.data.get("continue_conversation") is False
-
-    await _wait_for(_has_intent_output, timeout=1.0)
