@@ -238,7 +238,8 @@ async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -
                 "success": [],
                 "failed": [],
             },
-        }
+        },
+        "continue_conversation": False,
     }
     run_debug = PipelineRunDebug()
     run_debug.events.append(
@@ -284,6 +285,26 @@ async def test_intent_output_capture_updates_message_data(hass: HomeAssistant) -
             return False
         if assistant_message.text != "Hi":
             return False
-        return assistant_message.data.get("intent_output") == intent_output
+        expected_tool = {
+            "role": "tool_result",
+            "success": [],
+            "result": [{"name": "Light", "type": "entity", "id": "light.kitchen"}],
+        }
+        if tool_message.data.get("role") != expected_tool["role"]:
+            return False
+        if tool_message.data.get("success") != expected_tool["success"]:
+            return False
+        if tool_message.data.get("result") != expected_tool["result"]:
+            return False
+        expected_assistant = {
+            "role": "assistant",
+            "content": "Hi",
+            "continue_conversation": False,
+        }
+        if assistant_message.data.get("role") != expected_assistant["role"]:
+            return False
+        if assistant_message.data.get("content") != expected_assistant["content"]:
+            return False
+        return assistant_message.data.get("continue_conversation") is False
 
     await _wait_for(_has_intent_output, timeout=1.0)

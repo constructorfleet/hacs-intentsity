@@ -174,7 +174,7 @@ def _fetch_chat_log_snapshot(hass: HomeAssistant, conversation_id: str) -> dict[
         return chat_log.as_dict()
 
 
-def _find_intent_output(hass: HomeAssistant, conversation_id: str) -> dict[str, Any] | None:
+def _find_intent_output(hass: HomeAssistant, conversation_id: str) -> tuple[dict[str, Any], datetime] | None:
     pipeline_data = hass.data.get(KEY_ASSIST_PIPELINE)
     if pipeline_data is None:
         _LOGGER.debug("No pipeline data found in hass.data")
@@ -215,14 +215,17 @@ def _find_intent_output(hass: HomeAssistant, conversation_id: str) -> dict[str, 
                 latest_time = intent_time or datetime.now(timezone.utc)
                 latest_output = intent_output
     _LOGGER.debug("Found intent output for conversation_id=%s", conversation_id)
-    return latest_output
+    if latest_output is None or latest_time is None:
+        return None
+    return latest_output, latest_time
 
 
 async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> None:
     _LOGGER.debug("Capturing intent output for conversation_id=%s", conversation_id)
-    intent_output = _find_intent_output(hass, conversation_id)
-    if intent_output is None:
+    result = _find_intent_output(hass, conversation_id)
+    if result is None:
         return
+    intent_output, created_at = result
 
     chat = await hass.async_add_executor_job(
         db.fetch_latest_chat_by_conversation_id,
@@ -233,19 +236,22 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
         return
     speech_text = _intent_output_speech(intent_output)
     targets_payload = _intent_output_targets(intent_output)
+    continue_conversation = intent_output.get("continue_conversation", False)
 
     if speech_text is None and targets_payload is None:
         return
 
     if targets_payload is not None:
-        tool_result = {"tool_result": targets_payload, "intent_output": intent_output}
-        tool_text = json.dumps(targets_payload, ensure_ascii=True)
+        tool_payload = {
+            "role": "tool_result",
+            "success": targets_payload.get("success", []),
+            "result": targets_payload.get("targets", targets_payload),
+            "created": created_at.isoformat(),
+        }
+        tool_text = json.dumps(tool_payload.get("result"), ensure_ascii=True)
         if tool_text.strip():
             last_message = chat.messages[-1]
-            if (
-                last_message.sender == "tool_result"
-                and last_message.data.get("intent_output") == intent_output
-            ):
+            if last_message.sender == "tool_result" and last_message.data == tool_payload:
                 tool_text = ""
         if tool_text.strip():
             await hass.async_add_executor_job(
@@ -255,7 +261,7 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
                 models.ChatMessage(
                     sender="tool_result",
                     text=tool_text,
-                    data=tool_result,
+                    data=tool_payload,
                 ),
             )
 
@@ -265,11 +271,17 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
             if chat.messages[index].sender == "assistant":
                 last_assistant_index = index
                 break
+        assistant_payload = {
+            "role": "assistant",
+            "content": speech_text,
+            "created": created_at.isoformat(),
+            "continue_conversation": bool(continue_conversation),
+        }
         if last_assistant_index is not None and chat.messages[last_assistant_index].text == speech_text:
             message = chat.messages[last_assistant_index]
             updated_data = dict(message.data)
-            if updated_data.get("intent_output") != intent_output:
-                updated_data["intent_output"] = intent_output
+            if updated_data != assistant_payload:
+                updated_data = assistant_payload
                 chat.messages[last_assistant_index] = models.ChatMessage.model_validate(
                     {
                         **message.model_dump(),
@@ -290,7 +302,7 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
                 models.ChatMessage(
                     sender="assistant",
                     text=speech_text,
-                    data={"intent_output": intent_output},
+                    data=assistant_payload,
                 ),
             )
 
