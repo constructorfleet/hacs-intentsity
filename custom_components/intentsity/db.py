@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Final
 
 from homeassistant.core import HomeAssistant
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func, select, text
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, func, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, selectinload
@@ -314,19 +314,20 @@ class IntentsityDBClient:
                 created_at=chat.created_at,
                 conversation_id=chat.conversation_id,
             )
-            for index, msg in enumerate(chat.messages):
-                msg_row = ChatMessageRow(
-                    id=msg.id,
-                    chat_id=chat.conversation_id,
-                    position=msg.position if msg.position is not None else index,
-                    timestamp=msg.timestamp,
-                    sender=msg.sender,
-                    text=msg.text,
-                    data=_json_dumps(msg.data) if msg.data else None,
-                )
-                session.merge(msg_row)
             try:
                 session.merge(chat_row)
+                session.flush()
+                for index, msg in enumerate(chat.messages):
+                    msg_row = ChatMessageRow(
+                        id=msg.id,
+                        chat_id=chat.conversation_id,
+                        position=msg.position if msg.position is not None else index,
+                        timestamp=msg.timestamp,
+                        sender=msg.sender,
+                        text=msg.text,
+                        data=_json_dumps(msg.data) if msg.data else None,
+                    )
+                    session.merge(msg_row)
                 session.commit()
             except IntegrityError:
                 session.rollback()
@@ -334,6 +335,18 @@ class IntentsityDBClient:
                 if existing is None:
                     raise
                 existing.created_at = chat.created_at
+                session.flush()
+                for index, msg in enumerate(chat.messages):
+                    msg_row = ChatMessageRow(
+                        id=msg.id,
+                        chat_id=chat.conversation_id,
+                        position=msg.position if msg.position is not None else index,
+                        timestamp=msg.timestamp,
+                        sender=msg.sender,
+                        text=msg.text,
+                        data=_json_dumps(msg.data) if msg.data else None,
+                    )
+                    session.merge(msg_row)
                 session.commit()
             return chat.conversation_id
 
@@ -477,7 +490,15 @@ class IntentsityDBClient:
             db_path = get_db_path(self._hass)
             db_path.parent.mkdir(parents=True, exist_ok=True)
             self._engine = create_engine(f"sqlite:///{db_path}", future=True)
+            if self._engine.dialect.name == "sqlite":
+                event.listen(self._engine, "connect", _enable_sqlite_foreign_keys)
         return self._engine
+
+
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record) -> None:
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 def _get_client(hass: HomeAssistant) -> IntentsityDBClient:
