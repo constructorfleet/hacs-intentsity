@@ -241,6 +241,13 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
         tool_result = {"tool_result": targets_payload, "intent_output": intent_output}
         tool_text = json.dumps(targets_payload, ensure_ascii=True)
         if tool_text.strip():
+            last_message = chat.messages[-1]
+            if (
+                last_message.sender == "tool_result"
+                and last_message.data.get("intent_output") == intent_output
+            ):
+                tool_text = ""
+        if tool_text.strip():
             await hass.async_add_executor_job(
                 db.upsert_chat_message,
                 hass,
@@ -253,16 +260,39 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
             )
 
     if speech_text is not None:
-        await hass.async_add_executor_job(
-            db.upsert_chat_message,
-            hass,
-            chat.conversation_id,
-            models.ChatMessage(
-                sender="assistant",
-                text=speech_text,
-                data={"intent_output": intent_output},
-            ),
-        )
+        last_assistant_index = None
+        for index in range(len(chat.messages) - 1, -1, -1):
+            if chat.messages[index].sender == "assistant":
+                last_assistant_index = index
+                break
+        if last_assistant_index is not None and chat.messages[last_assistant_index].text == speech_text:
+            message = chat.messages[last_assistant_index]
+            updated_data = dict(message.data)
+            if updated_data.get("intent_output") != intent_output:
+                updated_data["intent_output"] = intent_output
+                chat.messages[last_assistant_index] = models.ChatMessage.model_validate(
+                    {
+                        **message.model_dump(),
+                        "data": updated_data,
+                    }
+                )
+                await hass.async_add_executor_job(
+                    db.replace_chat_messages,
+                    hass,
+                    chat.conversation_id,
+                    chat.messages,
+                )
+        else:
+            await hass.async_add_executor_job(
+                db.upsert_chat_message,
+                hass,
+                chat.conversation_id,
+                models.ChatMessage(
+                    sender="assistant",
+                    text=speech_text,
+                    data={"intent_output": intent_output},
+                ),
+            )
 
     async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
 
