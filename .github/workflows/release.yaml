@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync manifest version from pyproject
+        id: version
+        run: |
+          python - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
+          import os
+
+          pyproject = tomllib.loads(Path('pyproject.toml').read_text())
+          version = pyproject['project']['version']
+
+          manifest_path = Path('custom_components/intentsity/manifest.json')
+          manifest = json.loads(manifest_path.read_text())
+          manifest['version'] = version
+          manifest_path.write_text(json.dumps(manifest, indent=4) + "\n")
+
+          Path('version.txt').write_text(version)
+
+          output_path = os.environ.get('GITHUB_OUTPUT')
+          if output_path:
+              with open(output_path, 'a', encoding='utf-8') as handle:
+                  handle.write(f"version={version}\n")
+          PY
+
+      - name: Commit manifest update
+        run: |
+          if git diff --quiet; then
+            echo "No manifest changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add custom_components/intentsity/manifest.json
+          git commit -m "chore(release): sync manifest version"
+          git push
+
+      - name: Create tag
+        run: |
+          VERSION=$(cat version.txt)
+          TAG="v${VERSION}"
+          if git rev-parse "${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists"
+            exit 0
+          fi
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "${TAG}"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          generate_release_notes: true
