@@ -1,21 +1,21 @@
 {
     "domain": "intentsity",
     "name": "Intentsity",
-    "version": "0.5.0",
+    "codeowners": [
+        "@teagan42"
+    ],
     "config_flow": true,
+    "dependencies": [
+        "assist_pipeline",
+        "http"
+    ],
     "documentation": "https://github.com/constructorfleet/intentsity",
+    "iot_class": "local_push",
     "issue_tracker": "https://github.com/constructorfleet/hacs-intentsity/issues",
     "requirements": [
         "pydantic>=2.5.0",
         "sqlalchemy>=2.0.0",
         "voluptuous>=0.13.1"
     ],
-    "dependencies": [
-        "assist_pipeline",
-        "http"
-    ],
-    "codeowners": [
-        "@teagan42"
-    ],
-    "iot_class": "local_push"
+    "version": "0.5.0"
 }
