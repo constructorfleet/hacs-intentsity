@@ -329,7 +329,6 @@ async def _persist(hass: HomeAssistant, conversation_id: str, event_type: ChatLo
     has_existing = existing is not None
 
     if event_type == ChatLogEventType.DELETED:
-        await hass.async_add_executor_job(db.delete_chat, hass, conversation_id)
         return
     if update_event or not has_existing:
         snapshot_payload = chat_log_payload
