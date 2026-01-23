@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-from homeassistant.components import websocket_api
 
 from custom_components.intentsity import websocket
 from custom_components.intentsity.const import (
