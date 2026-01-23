@@ -18,9 +18,8 @@ from homeassistant.components.assist_pipeline.pipeline import (
 from homeassistant.components.conversation.chat_log import (
     DATA_CHAT_LOGS,
     async_get_chat_log,
-    async_subscribe_chat_logs,
 )
-from homeassistant.components.conversation.const import ChatLogEventType
+from homeassistant.components.conversation import ChatLogEventType
 from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
@@ -68,7 +67,9 @@ def _parse_timestamp(value: Any) -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _extract_message_payload(data: dict[str, Any]) -> tuple[str, str, datetime, dict[str, Any]]:
+def _extract_message_payload(
+    data: dict[str, Any],
+) -> tuple[str, str, datetime, dict[str, Any]]:
     payload = data.get("content")
     if isinstance(payload, dict):
         message_data = payload
@@ -95,7 +96,9 @@ def _messages_from_chat_log(chat_log: dict[str, Any]) -> list[Any]:
     for index, item in enumerate(content):
         if not isinstance(item, dict):
             continue
-        sender, text, timestamp, message_data = _extract_message_payload({"content": item})
+        sender, text, timestamp, message_data = _extract_message_payload(
+            {"content": item}
+        )
         if not text.strip():
             continue
         messages.append(
@@ -177,7 +180,9 @@ def _intent_output_targets(intent_output: dict[str, Any]) -> dict[str, Any] | No
     return {"targets": targets, "success": success, "failed": failed}
 
 
-def _fetch_chat_log_snapshot(hass: HomeAssistant, conversation_id: str) -> dict[str, Any]:
+def _fetch_chat_log_snapshot(
+    hass: HomeAssistant, conversation_id: str
+) -> dict[str, Any]:
     with (
         async_get_chat_session(hass, conversation_id) as session,
         async_get_chat_log(hass, session) as chat_log,
@@ -185,7 +190,9 @@ def _fetch_chat_log_snapshot(hass: HomeAssistant, conversation_id: str) -> dict[
         return chat_log.as_dict()
 
 
-def _find_intent_output(hass: HomeAssistant, conversation_id: str) -> tuple[dict[str, Any], datetime] | None:
+def _find_intent_output(
+    hass: HomeAssistant, conversation_id: str
+) -> tuple[dict[str, Any], datetime] | None:
     pipeline_data = hass.data.get(KEY_ASSIST_PIPELINE)
     if pipeline_data is None:
         return None
@@ -258,7 +265,10 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
         tool_text = json.dumps(tool_payload.get("result"), ensure_ascii=True)
         if tool_text.strip():
             last_message = chat.messages[-1]
-            if last_message.sender == "tool_result" and last_message.data == tool_payload:
+            if (
+                last_message.sender == "tool_result"
+                and last_message.data == tool_payload
+            ):
                 tool_text = ""
         if tool_text.strip():
             await hass.async_add_executor_job(
@@ -284,7 +294,10 @@ async def _capture_intent_output(hass: HomeAssistant, conversation_id: str) -> N
             "created": created_at.isoformat(),
             "continue_conversation": bool(continue_conversation),
         }
-        if last_assistant_index is not None and chat.messages[last_assistant_index].text == speech_text:
+        if (
+            last_assistant_index is not None
+            and chat.messages[last_assistant_index].text == speech_text
+        ):
             message = chat.messages[last_assistant_index]
             updated_data = dict(message.data)
             if updated_data != assistant_payload:
@@ -423,15 +436,21 @@ async def _async_initialize(hass: HomeAssistant) -> None:
                 data = chat_logs[conversation_id].as_dict()
                 event_type = ChatLogEventType.UPDATED
 
-        chat_log_payload = _extract_chat_log_payload(data) if isinstance(data, dict) else None
+        chat_log_payload = (
+            _extract_chat_log_payload(data) if isinstance(data, dict) else None
+        )
         update_event = event_type in {
             ChatLogEventType.UPDATED,
             ChatLogEventType.CREATED,
             ChatLogEventType.INITIAL_STATE,
-        } or (_CONTENT_UPDATED_EVENT is not None and event_type == _CONTENT_UPDATED_EVENT)
+        } or (
+            _CONTENT_UPDATED_EVENT is not None and event_type == _CONTENT_UPDATED_EVENT
+        )
 
         hass.async_create_task(
-            _persist(hass, conversation_id, event_type, data, chat_log_payload, update_event)
+            _persist(
+                hass, conversation_id, event_type, data, chat_log_payload, update_event
+            )
         )
 
     if not domain_data.get(DATA_DB_INITIALIZED, False):

@@ -5,8 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13.2"
 dependencies = [
-    "homeassistant==2026.1.0",
-    "numpy>=2.4.1",
+    "homeassistant==2025.6.1",
+    "numpy>=2.2.2",
     "pydantic>=2.12.5",
     "sqlalchemy>=2.0.0",
     "voluptuous>=0.13.1",
