@@ -10,10 +10,7 @@ from homeassistant.core import HomeAssistant
 
 from custom_components.intentsity import db
 from homeassistant.components.assist_pipeline.pipeline import (
-    KEY_ASSIST_PIPELINE,
     Pipeline,
-    PipelineEvent,
-    PipelineEventType,
     PipelineRunDebug,
 )
 
