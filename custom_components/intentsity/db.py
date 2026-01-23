@@ -8,6 +8,7 @@ from typing import Final
 from homeassistant.core import HomeAssistant
 from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, func, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, selectinload
 
 
@@ -309,19 +310,14 @@ class IntentsityDBClient:
     def upsert_chat(self, chat: Chat) -> str:
         engine = self._get_engine()
         with Session(engine) as session:
-            chat_row = session.get(ChatRow, chat.conversation_id)
-            if chat_row is None:
-                chat_row = ChatRow(
-                    created_at=chat.created_at,
-                    conversation_id=chat.conversation_id,
-                )
-                session.add(chat_row)
-            else:
-                chat_row.created_at = chat.created_at
+            chat_row = ChatRow(
+                created_at=chat.created_at,
+                conversation_id=chat.conversation_id,
+            )
             for index, msg in enumerate(chat.messages):
                 msg_row = ChatMessageRow(
                     id=msg.id,
-                    chat_id=chat_row.conversation_id,
+                    chat_id=chat.conversation_id,
                     position=msg.position if msg.position is not None else index,
                     timestamp=msg.timestamp,
                     sender=msg.sender,
@@ -329,8 +325,17 @@ class IntentsityDBClient:
                     data=_json_dumps(msg.data) if msg.data else None,
                 )
                 session.merge(msg_row)
-            session.commit()
-            return chat_row.conversation_id
+            try:
+                session.merge(chat_row)
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                existing = session.get(ChatRow, chat.conversation_id)
+                if existing is None:
+                    raise
+                existing.created_at = chat.created_at
+                session.commit()
+            return chat.conversation_id
 
     def upsert_chat_message(self, chat_id: str, message: ChatMessage) -> int:
         engine = self._get_engine()
