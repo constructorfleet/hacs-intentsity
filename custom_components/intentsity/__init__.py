@@ -6,7 +6,6 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.components.frontend import async_register_built_in_panel
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -82,6 +81,8 @@ async def _async_initialize(hass: HomeAssistant) -> None:
         await coordinator.async_config_entry_first_refresh()
 
     if not domain_data.get(DATA_API_REGISTERED, False):
+        from homeassistant.components.frontend import async_register_built_in_panel
+
         websocket.async_register_commands(hass)
         version = randint(0, 999999)
         await hass.http.async_register_static_paths(
