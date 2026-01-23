@@ -15,6 +15,8 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 [Add Intensity](https://my.home-assistant.io/redirect/hacs_repository/?owner=constructorfleet&repository=hacs-intentsity) in [HACS](https://hacs.xyz)
 2. Restart Home Assistant.
 3. In **Settings → Devices & Services**, click **+ Add Integration** and select **Intentsity**.
+- OR -
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=intentsity)
 4. After setup, open the **Assist Chat Log** sidebar entry (admin users only).
 
 ## Usage
