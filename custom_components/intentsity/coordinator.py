@@ -178,6 +178,8 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ),
         )
 
+        return chat
+
     async def _async_update_data(self) -> dict[str, Any]:
         pipeline_data = self.hass.data.get(KEY_ASSIST_PIPELINE)
         pipelines: dict[str, Any] = {}
