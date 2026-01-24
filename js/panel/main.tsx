@@ -803,13 +803,16 @@ class IntentsityChatList extends LitElement {
                     <section class="conversation-group">
                         <div class="conversation-header">
                             <div class="header-row">
-                                <ha-button @click=${() => this.toggleConversation(group.conversation_id)}>
+                                <ha-button
+                                    @click=${() => this.toggleConversation(group.conversation_id)}
+                                    aria-labelledby=${`conversation-heading-${group.conversation_id}`}
+                                >
                                     <ha-icon
                                         icon=${this.conversationExpanded[group.conversation_id] ? "mdi:chevron-up" : "mdi:chevron-down"}
                                     ></ha-icon>
                                     ${this.conversationExpanded[group.conversation_id] ? "Collapse" : "Expand"}
                                 </ha-button>
-                                <h3>Conversation ${group.conversation_id}</h3>
+                                <h3 id=${`conversation-heading-${group.conversation_id}`}>Conversation ${group.conversation_id}</h3>
                             </div>
                             <span class="conversation-meta">
                                 ${group.runs.length} run${group.runs.length === 1 ? "" : "s"}
