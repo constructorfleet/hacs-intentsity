@@ -1,15 +1,35 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Final
 
+import orjson
+
 from homeassistant.core import HomeAssistant
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, create_engine, event, func, select, text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    event,
+    func,
+    select,
+    text,
+)
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship, selectinload
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    Session,
+    mapped_column,
+    relationship,
+    selectinload,
+)
 
 
 from .const import DB_NAME, DOMAIN
@@ -22,15 +42,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-class _DateTimeEncoder(json.JSONEncoder):
-    def default(self, o: object) -> object:
-        if isinstance(o, datetime):
-            return o.isoformat()
-        return super().default(o)
-
-
 def _json_dumps(value: object) -> str:
-    return json.dumps(value, cls=_DateTimeEncoder)
+    return orjson.dumps(value).decode()
 
 
 class _DBBase(DeclarativeBase):
@@ -42,7 +55,9 @@ class ChatRow(_DBBase):
     __tablename__ = "chats"
 
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
     messages: Mapped[list["ChatMessageRow"]] = relationship(
         back_populates="chat",
         cascade="all, delete-orphan",
@@ -61,9 +76,13 @@ class ChatMessageRow(_DBBase):
     __tablename__ = "chat_messages"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[str] = mapped_column(ForeignKey("chats.conversation_id", ondelete="CASCADE"))
+    chat_id: Mapped[str] = mapped_column(
+        ForeignKey("chats.conversation_id", ondelete="CASCADE")
+    )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     sender: Mapped[str] = mapped_column(String, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -74,15 +93,21 @@ class ChatMessageRow(_DBBase):
 class CorrectedChatRow(_DBBase):
     __tablename__ = "corrected_chats"
     __table_args__ = (
-        UniqueConstraint("original_conversation_id", name="uniq_corrected_original_conversation"),
+        UniqueConstraint(
+            "original_conversation_id", name="uniq_corrected_original_conversation"
+        ),
     )
 
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
     original_conversation_id: Mapped[str] = mapped_column(
         ForeignKey("chats.conversation_id", ondelete="CASCADE"), index=True
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
     messages: Mapped[list["CorrectedChatMessageRow"]] = relationship(
         back_populates="corrected_chat",
         cascade="all, delete-orphan",
@@ -105,7 +130,9 @@ class CorrectedChatMessageRow(_DBBase):
         index=True,
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
     sender: Mapped[str] = mapped_column(String, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -299,12 +326,19 @@ class IntentsityDBClient:
                 conn.execute(text("DROP TABLE IF EXISTS chats"))
 
                 conn.execute(text("ALTER TABLE chats_new RENAME TO chats"))
-                conn.execute(text("ALTER TABLE chat_messages_new RENAME TO chat_messages"))
-                conn.execute(text("ALTER TABLE corrected_chats_new RENAME TO corrected_chats"))
-                conn.execute(text("ALTER TABLE corrected_chat_messages_new RENAME TO corrected_chat_messages"))
+                conn.execute(
+                    text("ALTER TABLE chat_messages_new RENAME TO chat_messages")
+                )
+                conn.execute(
+                    text("ALTER TABLE corrected_chats_new RENAME TO corrected_chats")
+                )
+                conn.execute(
+                    text(
+                        "ALTER TABLE corrected_chat_messages_new RENAME TO corrected_chat_messages"
+                    )
+                )
 
                 conn.execute(text("PRAGMA foreign_keys=ON"))
-
 
     # New chat persistence methods
     def upsert_chat(self, chat: Chat) -> str:
@@ -356,7 +390,9 @@ class IntentsityDBClient:
             position = message.position
             if position is None:
                 max_position = session.scalar(
-                    select(func.max(ChatMessageRow.position)).where(ChatMessageRow.chat_id == chat_id)
+                    select(func.max(ChatMessageRow.position)).where(
+                        ChatMessageRow.chat_id == chat_id
+                    )
                 )
                 position = (max_position or 0) + 1
             msg_row = ChatMessageRow(
@@ -375,7 +411,9 @@ class IntentsityDBClient:
     def replace_chat_messages(self, chat_id: str, messages: list[ChatMessage]) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
-            session.query(ChatMessageRow).filter(ChatMessageRow.chat_id == chat_id).delete()
+            session.query(ChatMessageRow).filter(
+                ChatMessageRow.chat_id == chat_id
+            ).delete()
             for index, msg in enumerate(messages):
                 msg_row = ChatMessageRow(
                     chat_id=chat_id,
@@ -437,7 +475,9 @@ class IntentsityDBClient:
                 .limit(limit)
                 .options(
                     selectinload(ChatRow.messages),
-                    selectinload(ChatRow.corrected).selectinload(CorrectedChatRow.messages),
+                    selectinload(ChatRow.corrected).selectinload(
+                        CorrectedChatRow.messages
+                    ),
                 )
             )
             rows = session.scalars(stmt).all()
@@ -453,7 +493,9 @@ class IntentsityDBClient:
                 .limit(1)
                 .options(
                     selectinload(ChatRow.messages),
-                    selectinload(ChatRow.corrected).selectinload(CorrectedChatRow.messages),
+                    selectinload(ChatRow.corrected).selectinload(
+                        CorrectedChatRow.messages
+                    ),
                 )
             )
             row = session.scalars(stmt).first()
@@ -468,7 +510,8 @@ class IntentsityDBClient:
                 select(func.count(ChatRow.conversation_id))
                 .outerjoin(
                     CorrectedChatRow,
-                    CorrectedChatRow.original_conversation_id == ChatRow.conversation_id,
+                    CorrectedChatRow.original_conversation_id
+                    == ChatRow.conversation_id,
                 )
                 .where(CorrectedChatRow.conversation_id.is_(None))
             )
@@ -496,7 +539,6 @@ class IntentsityDBClient:
         if self._engine is not None:
             self._engine.dispose()
             self._engine = None
-
 
     def _get_engine(self) -> Engine:
         if self._engine is None:
@@ -537,30 +579,17 @@ def init_db(hass: HomeAssistant) -> None:
     _get_client(hass).ensure_initialized()
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def upsert_chat(hass: HomeAssistant, chat: Chat) -> str:
     return _get_client(hass).upsert_chat(chat)
+
 
 def upsert_chat_message(hass: HomeAssistant, chat_id: str, message: ChatMessage) -> int:
     return _get_client(hass).upsert_chat_message(chat_id, message)
 
 
-def replace_chat_messages(hass: HomeAssistant, chat_id: str, messages: list[ChatMessage]) -> None:
+def replace_chat_messages(
+    hass: HomeAssistant, chat_id: str, messages: list[ChatMessage]
+) -> None:
     return _get_client(hass).replace_chat_messages(chat_id, messages)
 
 
@@ -568,12 +597,16 @@ def fetch_recent_chats(hass: HomeAssistant, limit: int) -> list[Chat]:
     return _get_client(hass).fetch_recent_chats(limit)
 
 
-def fetch_latest_chat_by_conversation_id(hass: HomeAssistant, conversation_id: str) -> Chat | None:
+def fetch_latest_chat_by_conversation_id(
+    hass: HomeAssistant, conversation_id: str
+) -> Chat | None:
     return _get_client(hass).fetch_latest_chat_by_conversation_id(conversation_id)
 
 
 def upsert_corrected_chat(
-    hass: HomeAssistant, original_conversation_id: str, messages: list[CorrectedChatMessage]
+    hass: HomeAssistant,
+    original_conversation_id: str,
+    messages: list[CorrectedChatMessage],
 ) -> str:
     return _get_client(hass).upsert_corrected_chat(original_conversation_id, messages)
 
@@ -599,7 +632,7 @@ def _row_to_chat(row: ChatRow) -> Chat:
             timestamp=msg.timestamp,
             sender=msg.sender,
             text=msg.text,
-            data=json.loads(msg.data) if msg.data else {},
+            data=orjson.loads(msg.data) if msg.data else {},
         )
         for msg in row.messages
     ]
@@ -614,7 +647,7 @@ def _row_to_chat(row: ChatRow) -> Chat:
                 timestamp=msg.timestamp,
                 sender=msg.sender,
                 text=msg.text,
-                data=json.loads(msg.data) if msg.data else {},
+                data=orjson.loads(msg.data) if msg.data else {},
             )
             for msg in row.corrected.messages
         ]
