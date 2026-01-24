@@ -20,7 +20,6 @@ from homeassistant.components.conversation.chat_log import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
-import orjson
 
 
 from . import db
@@ -90,15 +89,6 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
             )
         )
     elif "tool_result" in data:
-        tool_result = data.get("tool_result", {})
-        text: str | None = tool_result.get("result", None)
-        if not text:
-            content = tool_result.get("content", None)
-            if isinstance(content, list):
-                text = "\n\n".join([c["text"] for c in content])
-            elif isinstance(content, str):
-                text = content
-
         chat.messages.append(
             ChatMessage(
                 chat_id=chat.conversation_id,
