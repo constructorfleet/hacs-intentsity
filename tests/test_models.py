@@ -23,6 +23,8 @@ def test_chat_validation() -> None:
     chat = models.Chat(
         created_at=now,
         conversation_id="conv-123",
+        pipeline_run_id="run-1",
+        run_timestamp=now,
         messages=[
             models.ChatMessage(
                 timestamp=now,
@@ -37,6 +39,8 @@ def test_chat_validation() -> None:
         ]
     )
     assert chat.conversation_id == "conv-123"
+    assert chat.pipeline_run_id == "run-1"
+    assert chat.run_timestamp == now
     assert len(chat.messages) == 2
     assert chat.messages[0].sender == "user"
     assert chat.messages[1].text == "Pong"

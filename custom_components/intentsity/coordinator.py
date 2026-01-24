@@ -25,6 +25,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from . import db
 from .const import DOMAIN
 from .models import Chat, ChatMessage
+from .utils import parse_timestamp
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,16 +33,26 @@ HANDLED_PIPELINE_EVENTS = {
     PipelineEventType.RUN_START,
     PipelineEventType.INTENT_START,
     PipelineEventType.INTENT_PROGRESS,
+    PipelineEventType.INTENT_END,
 }
 
 
-def _process_run_start(event: PipelineEvent) -> Chat | None:
+def _process_run_start(
+    event: PipelineEvent,
+    pipeline_run_id: str,
+    run_timestamp: str,
+) -> Chat | None:
     if not event.data:
         return None
     conversation_id = event.data.get("conversation_id", "")
     if not conversation_id:
         return None
-    return Chat(conversation_id=conversation_id, messages=[])
+    return Chat(
+        conversation_id=conversation_id,
+        pipeline_run_id=pipeline_run_id,
+        run_timestamp=parse_timestamp(run_timestamp),
+        messages=[],
+    )
 
 
 def _process_intent_start(event: PipelineEvent, chat: Chat) -> Chat | None:
@@ -51,6 +62,7 @@ def _process_intent_start(event: PipelineEvent, chat: Chat) -> Chat | None:
     chat.messages.append(
         ChatMessage(
             chat_id=chat.conversation_id,
+            timestamp=parse_timestamp(event.timestamp),
             sender="assistant",
             text=data.pop("intent_input", ""),
             data=asdict(data) if is_dataclass(data) else data,
@@ -70,6 +82,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
         chat.messages.append(
             ChatMessage(
                 chat_id=chat.conversation_id,
+                timestamp=parse_timestamp(event.timestamp),
                 sender=data.get("role", "tool_calls"),
                 text="",
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
@@ -88,6 +101,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
         chat.messages.append(
             ChatMessage(
                 chat_id=chat.conversation_id,
+                timestamp=parse_timestamp(event.timestamp),
                 sender=data.get("role", "tool_result"),
                 text=text or "",
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
@@ -103,6 +117,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
             chat.messages.append(
                 ChatMessage(
                     chat_id=chat.conversation_id,
+                    timestamp=parse_timestamp(event.timestamp),
                     sender=data.get("role", "assistant"),
                     text="",
                     data={},
@@ -127,18 +142,22 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _process_pipeline_run(
         self,
         pipeline_run: PipelineRunDebug,
+        pipeline_run_id: str,
     ) -> Chat | None:
         all_chat_logs = self.hass.data[DATA_CHAT_LOGS]
         if not all_chat_logs:
             return None
         chat: Chat | None = None
+        chat_ended = False
         for event in [
             event
             for event in pipeline_run.events
             if event.type in HANDLED_PIPELINE_EVENTS
         ]:
             if event.type == PipelineEventType.RUN_START:
-                chat = _process_run_start(event)
+                chat = _process_run_start(
+                    event, pipeline_run_id, pipeline_run.timestamp
+                )
             else:
                 if not chat:
                     return None
@@ -146,8 +165,10 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     chat = _process_intent_start(event, chat)
                 elif event.type == PipelineEventType.INTENT_PROGRESS:
                     chat = _process_intent_progress(event, chat)
+                elif event.type == PipelineEventType.INTENT_END:
+                    chat_ended = True
 
-        if not chat:
+        if not chat or not chat_ended:
             return None
 
         chat_log = all_chat_logs.get(chat.conversation_id)
@@ -171,6 +192,7 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ChatMessage(
                 sender="system",
                 chat_id=chat.conversation_id,
+                timestamp=chat.run_timestamp,
                 text="\n\n".join([content.content for content in system_content]),
                 data=functools.reduce(
                     accumulate, [asdict(context) for context in system_content], {}
@@ -187,6 +209,11 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if pipeline_data is None:
             return {}
 
+        existing_chats = await self.hass.async_add_executor_job(
+            db.fetch_recent_chats, self.hass
+        )
+        existing_run_ids = [chat.pipeline_run_id for chat in existing_chats]
+
         for pipeline in async_get_pipelines(self.hass):
             try:
                 resolved = async_get_pipeline(self.hass, pipeline.id)
@@ -196,8 +223,11 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             runs = pipeline_data.pipeline_debug.get(resolved.id)
             if not runs:
                 continue
-            for run_debug in runs.values():
-                chat = self._process_pipeline_run(run_debug)
+            for run_id, run_debug in runs.items():
+                if run_id in existing_run_ids:
+                    _LOGGER.debug("Skipping existing run_id=%s", run_id)
+                    continue
+                chat = self._process_pipeline_run(run_debug, run_id)
                 if not chat:
                     continue
 

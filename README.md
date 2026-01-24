@@ -28,7 +28,7 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Developers can access the logs via WebSocket:
 	- `intentsity/chats/list` with a `limit` to fetch snapshots.
 	- `intentsity/chats/subscribe` for live push updates.
-	- `intentsity/chats/corrected/save` with `conversation_id` and `messages` to persist corrections.
+	- `intentsity/chats/corrected/save` with `conversation_id`, `pipeline_run_id`, and `messages` to persist corrections.
 
 ## Development Notes
 - Data models are strictly validated via Pydantic (`models.py`).
@@ -36,6 +36,8 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Corrected chats are stored in new tables; existing databases will auto-create them on startup.
 - Schema v2 adds a `position` column to `chat_messages` to preserve ordering on updates; it is auto-migrated on startup.
 - Schema v3 uses `conversation_id` as the primary key for chats and corrected chats; existing installs are migrated on startup.
+- Schema v4 adds `pipeline_run_id` to chat identity (composite key with `conversation_id`) and propagates it through corrected chats; existing installs are migrated on startup (legacy runs are tagged with `pipeline_run_id` = `legacy`).
+- Schema v5 adds `run_timestamp` to chats and persists event timestamps on messages; existing installs are migrated on startup (legacy runs use `created_at` as `run_timestamp`).
 - UI source is in `js/panel/main.tsx` (LitElement + TypeScript).
 - Run `npm run build` to compile the panel into `custom_components/intentsity/panel.js`.
 - Run `uv run pytest` to execute the test suite.

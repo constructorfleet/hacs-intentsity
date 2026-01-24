@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -49,17 +50,26 @@ class _SystemContent(SystemContent):
 
 
 def test_process_run_start() -> None:
+    now = datetime.now(timezone.utc)
     event = PipelineEvent(
         PipelineEventType.RUN_START,
         {"conversation_id": "conv-1"},
     )
-    chat = _process_run_start(event)
+    chat = _process_run_start(event, "run-1", now)
     assert chat is not None
     assert chat.conversation_id == "conv-1"
+    assert chat.pipeline_run_id == "run-1"
+    assert chat.run_timestamp == now
 
 
 def test_process_intent_start_appends_message() -> None:
-    chat = Chat(conversation_id="conv-2", messages=[])
+    now = datetime.now(timezone.utc)
+    chat = Chat(
+        conversation_id="conv-2",
+        pipeline_run_id="run-2",
+        run_timestamp=now,
+        messages=[],
+    )
     event = PipelineEvent(
         PipelineEventType.INTENT_START,
         {"conversation_id": "conv-2", "intent_input": "Hello", "meta": "x"},
@@ -69,10 +79,17 @@ def test_process_intent_start_appends_message() -> None:
     assert len(chat.messages) == 1
     assert chat.messages[0].text == "Hello"
     assert chat.messages[0].data == {"conversation_id": "conv-2", "meta": "x"}
+    assert chat.messages[0].timestamp == event.timestamp
 
 
 def test_process_intent_progress_tool_calls_and_content() -> None:
-    chat = Chat(conversation_id="conv-3", messages=[])
+    now = datetime.now(timezone.utc)
+    chat = Chat(
+        conversation_id="conv-3",
+        pipeline_run_id="run-3",
+        run_timestamp=now,
+        messages=[],
+    )
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
         {"chat_log_delta": {"tool_calls": [{"name": "foo"}], "role": "tool_calls"}},
@@ -80,6 +97,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     updated = _process_intent_progress(event, chat)
     assert updated is chat
     assert chat.messages[0].sender == "tool_calls"
+    assert chat.messages[0].timestamp == event.timestamp
 
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
@@ -89,6 +107,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     assert updated is chat
     assert chat.messages[1].text == "ok"
     assert chat.messages[1].sender == "tool_result"
+    assert chat.messages[1].timestamp == event.timestamp
 
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
@@ -97,10 +116,17 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     updated = _process_intent_progress(event, chat)
     assert updated is not None
     assert chat.messages[-1].text == "Hi"
+    assert chat.messages[-1].timestamp == event.timestamp
 
 
 def test_process_intent_progress_tool_calls_skip_content() -> None:
-    chat = Chat(conversation_id="conv-5", messages=[])
+    now = datetime.now(timezone.utc)
+    chat = Chat(
+        conversation_id="conv-5",
+        pipeline_run_id="run-5",
+        run_timestamp=now,
+        messages=[],
+    )
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
         {
@@ -115,6 +141,7 @@ def test_process_intent_progress_tool_calls_skip_content() -> None:
     assert updated is chat
     assert len(chat.messages) == 1
     assert chat.messages[0].text == ""
+    assert chat.messages[0].timestamp == event.timestamp
 
 
 @pytest.mark.asyncio
@@ -162,7 +189,7 @@ async def test_async_update_data_persists_chat(hass, monkeypatch) -> None:
 
     def _upsert_chat(_hass, chat):
         persisted["chat"] = chat
-        return chat.conversation_id
+        return chat.conversation_id, chat.pipeline_run_id
 
     monkeypatch.setattr(db, "upsert_chat", _upsert_chat)
     monkeypatch.setattr(db, "count_uncorrected_chats", lambda _hass: 2)
@@ -171,6 +198,8 @@ async def test_async_update_data_persists_chat(hass, monkeypatch) -> None:
     data = await coordinator._async_update_data()
 
     assert persisted["chat"].conversation_id == "conv-4"
+    assert persisted["chat"].pipeline_run_id == "run-1"
+    assert persisted["chat"].run_timestamp == run_debug.timestamp
     assert data["uncorrected_count"] == 2
 
 
