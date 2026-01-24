@@ -725,9 +725,9 @@ class IntentsityChatList extends LitElement {
     }
 
     private getFirstUserSnippet(messages: ChatMessage[]): string {
-        const messageCount = messages.length;
         const message = messages.find((msg) => msg.sender === "user");
         if (!message) {
+            const messageCount = messages.length;
             return `${messageCount} message${messageCount === 1 ? "" : "s"}`;
         }
         const text = message.text ?? "";
