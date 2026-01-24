@@ -74,7 +74,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 data=data,
             )
         )
-    if "tool_result" in data:
+    elif "tool_result" in data:
         tool_result = data.get("tool_result", {})
         text: str | None = tool_result.get("result", None)
         if not text:
@@ -92,7 +92,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 data=data,
             )
         )
-    if "content" in data:
+    elif "content" in data:
         content = data.get("content", "")
         if not content:
             return chat
@@ -110,8 +110,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
         chat_message = chat.messages[-1]
         chat_message.text += content
         chat_message.data.update(data)
-        return chat
-    return None
+    return chat
 
 
 class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):

@@ -78,7 +78,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
         {"chat_log_delta": {"tool_calls": [{"name": "foo"}], "role": "tool_calls"}},
     )
     updated = _process_intent_progress(event, chat)
-    assert updated is None
+    assert updated is chat
     assert chat.messages[0].sender == "tool_calls"
 
     event = PipelineEvent(
@@ -86,7 +86,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
         {"chat_log_delta": {"tool_result": {"result": "ok"}, "role": "tool_result"}},
     )
     updated = _process_intent_progress(event, chat)
-    assert updated is None
+    assert updated is chat
     assert chat.messages[1].text == "ok"
     assert chat.messages[1].sender == "tool_result"
 
@@ -97,6 +97,24 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     updated = _process_intent_progress(event, chat)
     assert updated is not None
     assert chat.messages[-1].text == "Hi"
+
+
+def test_process_intent_progress_tool_calls_skip_content() -> None:
+    chat = Chat(conversation_id="conv-5", messages=[])
+    event = PipelineEvent(
+        PipelineEventType.INTENT_PROGRESS,
+        {
+            "chat_log_delta": {
+                "tool_calls": [{"name": "foo"}],
+                "content": "Ignored",
+                "role": "tool_calls",
+            }
+        },
+    )
+    updated = _process_intent_progress(event, chat)
+    assert updated is chat
+    assert len(chat.messages) == 1
+    assert chat.messages[0].text == ""
 
 
 @pytest.mark.asyncio
