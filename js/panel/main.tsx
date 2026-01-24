@@ -42,7 +42,9 @@ interface CorrectedChatMessage {
 
 interface CorrectedChat {
     conversation_id: string;
+    pipeline_run_id: string;
     original_conversation_id: string;
+    original_pipeline_run_id: string;
     created_at: string;
     updated_at: string;
     messages: CorrectedChatMessage[];
@@ -50,6 +52,8 @@ interface CorrectedChat {
 
 interface Chat {
     conversation_id: string;
+    pipeline_run_id: string;
+    run_timestamp: string;
     created_at: string;
     messages: ChatMessage[];
     corrected?: CorrectedChat | null;
@@ -70,6 +74,55 @@ const clampLimit = (raw: number | string): number => {
     const parsed = Number(raw);
     const value = Number.isFinite(parsed) ? parsed : DEFAULT_LIMIT;
     return Math.max(1, Math.min(MAX_LIMIT, value || DEFAULT_LIMIT));
+};
+
+const buildChatKey = (conversationId: string, pipelineRunId: string): string =>
+    `${conversationId}::${pipelineRunId}`;
+
+const parseChatKey = (chatKey: string): { conversationId: string; pipelineRunId: string; } => {
+    const [conversationId, pipelineRunId] = chatKey.split("::");
+    return { conversationId, pipelineRunId };
+};
+
+const getChatKey = (chat: Chat): string => buildChatKey(chat.conversation_id, chat.pipeline_run_id);
+
+type ConversationGroup = {
+    conversation_id: string;
+    runs: Chat[];
+};
+
+const toEpoch = (value: string | undefined): number => {
+    const timestamp = value ? new Date(value).getTime() : NaN;
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+};
+
+const sortRunsAscending = (runs: Chat[]): Chat[] => (
+    [...runs].sort((a, b) => {
+        const diff = toEpoch(a.run_timestamp) - toEpoch(b.run_timestamp);
+        if (diff !== 0) {
+            return diff;
+        }
+        return toEpoch(a.created_at) - toEpoch(b.created_at);
+    })
+);
+
+const groupChatsByConversation = (chats: Chat[]): ConversationGroup[] => {
+    const groups = new Map<string, ConversationGroup>();
+    const ordered: ConversationGroup[] = [];
+    chats.forEach((chat) => {
+        const key = chat.conversation_id;
+        let group = groups.get(key);
+        if (!group) {
+            group = { conversation_id: key, runs: [] };
+            groups.set(key, group);
+            ordered.push(group);
+        }
+        group.runs.push(chat);
+    });
+    return ordered.map((group) => ({
+        ...group,
+        runs: sortRunsAscending(group.runs),
+    }));
 };
 
 const formatTimestamp = (value: string): string => new Date(value).toLocaleString();
@@ -247,7 +300,12 @@ class IntentsityMarkdown extends LitElement {
 @customElement("intentsity-chat-list")
 class IntentsityChatList extends LitElement {
     @property({ attribute: false }) chats: Chat[] = [];
-    @property({ attribute: false }) onSaveCorrected?: (conversationId: string, messages: CorrectedChatMessage[]) => Promise<void>;
+    @property({ attribute: false })
+    onSaveCorrected?: (
+        conversationId: string,
+        pipelineRunId: string,
+        messages: CorrectedChatMessage[],
+    ) => Promise<void>;
     @state() private drafts: Record<string, DraftMessage[]> = {};
     @state() private errors: Record<string, string | undefined> = {};
     @state() private saving: Record<string, boolean> = {};
@@ -409,6 +467,26 @@ class IntentsityChatList extends LitElement {
             .corrected-card {
                 border-left: 4px solid var(--success-color, #2e7d32);
             }
+            .conversation-group {
+                display: flex;
+                flex-direction: column;
+                gap: 16px;
+            }
+            .conversation-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: baseline;
+                gap: 12px;
+                padding: 4px 4px 0;
+            }
+            .conversation-header h3 {
+                margin: 0;
+                font-size: 20px;
+            }
+            .conversation-meta {
+                font-size: 12px;
+                color: var(--secondary-text-color);
+            }
             .toast {
                 position: fixed;
                 right: 24px;
@@ -437,9 +515,9 @@ class IntentsityChatList extends LitElement {
         const updatedExpanded: Record<string, boolean> = { ...this.expanded };
         const chatIds = new Set<string>();
         this.chats.forEach((chat, index) => {
-            const conversationId = chat.conversation_id;
-            chatIds.add(conversationId);
-            if (updatedDrafts[conversationId]) {
+            const chatKey = getChatKey(chat);
+            chatIds.add(chatKey);
+            if (updatedDrafts[chatKey]) {
                 return;
             }
             const seedMessages = chat.corrected?.messages?.length
@@ -455,7 +533,7 @@ class IntentsityChatList extends LitElement {
                       data: msg.data ?? {},
                   }));
 
-            updatedDrafts[conversationId] = seedMessages.map((msg) => ({
+            updatedDrafts[chatKey] = seedMessages.map((msg) => ({
                 original_message_id: msg.original_message_id ?? null,
                 timestamp: msg.timestamp,
                 sender: msg.sender,
@@ -463,8 +541,8 @@ class IntentsityChatList extends LitElement {
                 dataText: toJsonText(msg.data),
             }));
 
-            if (updatedExpanded[conversationId] === undefined) {
-                updatedExpanded[conversationId] = index === 0;
+            if (updatedExpanded[chatKey] === undefined) {
+                updatedExpanded[chatKey] = index === 0;
             }
         });
 
@@ -483,7 +561,7 @@ class IntentsityChatList extends LitElement {
     }
 
     private getCorrectedAt(chat: Chat): string | undefined {
-        return this.correctedOverrides[chat.conversation_id] ?? chat.corrected?.updated_at;
+        return this.correctedOverrides[getChatKey(chat)] ?? chat.corrected?.updated_at;
     }
 
     private showToast(message: string, kind: "success" | "error") {
@@ -511,12 +589,12 @@ class IntentsityChatList extends LitElement {
         const correctedAt = new Date().toISOString();
         this.correctedOverrides = { ...this.correctedOverrides, [chatId]: correctedAt };
         const nextChat = this.chats.find((chat) => {
-            if (chat.conversation_id === chatId) {
+            if (getChatKey(chat) === chatId) {
                 return false;
             }
             return !this.getCorrectedAt(chat);
         });
-        const nextId = nextChat?.conversation_id;
+        const nextId = nextChat ? getChatKey(nextChat) : undefined;
         this.expanded = {
             ...this.expanded,
             [chatId]: false,
@@ -604,8 +682,9 @@ class IntentsityChatList extends LitElement {
             return;
         }
         this.saving = { ...this.saving, [chatId]: true };
+        const { conversationId, pipelineRunId } = parseChatKey(chatId);
         try {
-            await this.onSaveCorrected(chatId, parsed);
+            await this.onSaveCorrected(conversationId, pipelineRunId, parsed);
             this.showToast("Corrected conversation saved.", "success");
             this.markCorrectedAndAdvance(chatId);
         } catch (error) {
@@ -695,149 +774,175 @@ class IntentsityChatList extends LitElement {
         }
         return html`
             <div class="chat-grid">
-                ${this.chats.map((chat) => {
-                    const chatId = chat.conversation_id;
-                    const isExpanded = this.expanded[chatId] ?? false;
-                    const preview = this.getFirstUserSnippet(chat);
-                    const correctedAt = this.getCorrectedAt(chat);
-                    const isCorrected = Boolean(correctedAt);
-                    return html`
-                    <ha-card class=${isCorrected ? "corrected-card" : ""} data-chat-id=${chatId}>
-                        <div class="card-content">
-                            <div class="chat-header">
-                                <div class="header-row">
-                                    <ha-button @click=${() => this.toggleExpanded(chatId)}>
-                                        <ha-icon icon=${isExpanded ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
-                                        ${isExpanded ? "Collapse" : "Expand"}
-                                    </ha-button>
-                                    <ha-chip-set class="chip-row">
-                                        <ha-assist-chip label="Conversation ${chat.conversation_id}" hasIcon>
-                                            <ha-icon slot="icon" icon="mdi:conversation"></ha-icon>
-                                        </ha-assist-chip>
-                                        ${isCorrected
-                                            ? html`
-                                                  <ha-assist-chip label="Corrected ${formatTimestamp(correctedAt!)}" hasIcon>
-                                                      <ha-icon slot="icon" icon="mdi:check-circle"></ha-icon>
-                                                  </ha-assist-chip>
-                                              `
-                                            : nothing}
-                                    </ha-chip-set>
-                                    ${!isExpanded ? html`<div class="preview">${preview}</div>` : nothing}
-                                </div>
-                                <span class="time">${formatTimestamp(chat.created_at)}</span>
-                            </div>
-                                    ${isExpanded
-                                        ? html`
-                                      <div class="comparison">
-                                          <section class="panel">
-                                              <h4>Original</h4>
-                                              <div class="messages-list">
-                                                  ${chat.messages.map(msg => html`
-                                                      <intentsity-chat-message .message=${msg}></intentsity-chat-message>
-                                                  `)}
-                                              </div>
-                                          </section>
-                                          <section class="panel">
-                                              <h4>Corrected</h4>
-                                              ${(this.drafts[chatId] ?? []).map((draft, index) => html`
-                                                  <div class="draft-message">
-                                                      <div class="draft-controls">
-                                                          <ha-button @click=${() => this.moveDraft(chatId, index, -1)}>
-                                                              <ha-icon icon="mdi:arrow-up"></ha-icon>
-                                                              Up
-                                                          </ha-button>
-                                                          <ha-button @click=${() => this.moveDraft(chatId, index, 1)}>
-                                                              <ha-icon icon="mdi:arrow-down"></ha-icon>
-                                                              Down
-                                                          </ha-button>
-                                                          <ha-button @click=${() => this.removeDraft(chatId, index)}>
-                                                              <ha-icon icon="mdi:delete"></ha-icon>
-                                                              Remove
-                                                          </ha-button>
-                                                          ${draft.original_message_id
-                                                              ? html`
-                                                                    <ha-chip-set class="chip-row">
-                                                                        <ha-assist-chip label="Original #${draft.original_message_id}" hasIcon>
-                                                                            <ha-icon slot="icon" icon="mdi:message-text"></ha-icon>
-                                                                        </ha-assist-chip>
-                                                                    </ha-chip-set>
-                                                                `
-                                                              : html`
-                                                                    <ha-chip-set class="chip-row">
-                                                                        <ha-assist-chip label="New message" hasIcon>
-                                                                            <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
-                                                                        </ha-assist-chip>
-                                                                    </ha-chip-set>
-                                                                `}
-                                                      </div>
-                                                      <ha-textfield
-                                                          label="Sender"
-                                                          .value=${draft.sender}
-                                                          @input=${(event: Event) =>
-                                                              this.updateDraft(
-                                                                  chatId,
-                                                                  index,
-                                                                  { sender: (event.target as HTMLInputElement).value },
-                                                              )}
-                                                      ></ha-textfield>
-                                                      <div class="field-row">
-                                                          <ha-textfield
-                                                              label="Message"
-                                                              .value=${draft.text}
-                                                              @input=${(event: Event) =>
-                                                                  this.updateDraft(
-                                                                      chatId,
-                                                                      index,
-                                                                      { text: (event.target as HTMLInputElement).value },
-                                                                  )}
-                                                              multiline
-                                                          ></ha-textfield>
-                                                          <ha-button @click=${() => this.openDialog(chatId, index, "text")}>
-                                                              <ha-icon icon="mdi:pencil"></ha-icon>
-                                                          </ha-button>
-                                                      </div>
-                                                      <div class="field-row">
-                                                          <ha-textfield
-                                                              label="Metadata (JSON)"
-                                                              .value=${draft.dataText}
-                                                              @input=${(event: Event) =>
-                                                                  this.updateDraft(
-                                                                      chatId,
-                                                                      index,
-                                                                      { dataText: (event.target as HTMLInputElement).value },
-                                                                  )}
-                                                              multiline
-                                                          ></ha-textfield>
-                                                          <ha-button @click=${() => this.openDialog(chatId, index, "data")}>
-                                                              <ha-icon icon="mdi:pencil"></ha-icon>
-                                                          </ha-button>
-                                                      </div>
-                                                  </div>
-                                              `)}
-                                              <div class="save-row">
-                                                  <div class="draft-controls">
-                                                      <ha-button @click=${() => this.addDraft(chatId)}>
-                                                          <ha-icon icon="mdi:plus-circle"></ha-icon>
-                                                          Add message
-                                                      </ha-button>
-                                                  </div>
-                                                  <ha-button
-                                                      @click=${() => void this.handleSave(chatId)}
-                                                      ?disabled=${this.saving[chatId]}
-                                                  >
-                                                      <ha-icon icon="mdi:content-save"></ha-icon>
-                                                      ${this.saving[chatId] ? "Saving..." : "Save corrections"}
-                                                  </ha-button>
-                                              </div>
-                                              ${this.errors[chatId] ? html`<div class="error">${this.errors[chatId]}</div>` : nothing}
-                                          </section>
-                                      </div>
-                                  `
-                                : nothing}
+                ${groupChatsByConversation(this.chats).map((group) => html`
+                    <section class="conversation-group">
+                        <div class="conversation-header">
+                            <h3>Conversation ${group.conversation_id}</h3>
+                            <span class="conversation-meta">
+                                ${group.runs.length} run${group.runs.length === 1 ? "" : "s"}
+                            </span>
                         </div>
-                    </ha-card>
-                `;
-                })}
+                        ${group.runs.map((chat) => {
+                            const chatId = getChatKey(chat);
+                            const isExpanded = this.expanded[chatId] ?? false;
+                            const preview = this.getFirstUserSnippet(chat);
+                            const correctedAt = this.getCorrectedAt(chat);
+                            const isCorrected = Boolean(correctedAt);
+                            const orderedMessages = [...chat.messages].sort((a, b) => {
+                                const diff = toEpoch(a.timestamp) - toEpoch(b.timestamp);
+                                if (diff !== 0) {
+                                    return diff;
+                                }
+                                return (a.id ?? 0) - (b.id ?? 0);
+                            });
+                            return html`
+                                <ha-card class=${isCorrected ? "corrected-card" : ""} data-chat-id=${chatId}>
+                                    <div class="card-content">
+                                        <div class="chat-header">
+                                            <div class="header-row">
+                                                <ha-button @click=${() => this.toggleExpanded(chatId)}>
+                                                    <ha-icon icon=${isExpanded ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
+                                                    ${isExpanded ? "Collapse" : "Expand"}
+                                                </ha-button>
+                                                <ha-chip-set class="chip-row">
+                                                    <ha-assist-chip
+                                                        label="Run ${chat.pipeline_run_id}"
+                                                        hasIcon
+                                                    >
+                                                        <ha-icon slot="icon" icon="mdi:timeline"></ha-icon>
+                                                    </ha-assist-chip>
+                                                    <ha-assist-chip
+                                                        label="Started ${formatTimestamp(chat.run_timestamp)}"
+                                                        hasIcon
+                                                    >
+                                                        <ha-icon slot="icon" icon="mdi:clock-start"></ha-icon>
+                                                    </ha-assist-chip>
+                                                    ${isCorrected
+                                                        ? html`
+                                                              <ha-assist-chip label="Corrected ${formatTimestamp(correctedAt!)}" hasIcon>
+                                                                  <ha-icon slot="icon" icon="mdi:check-circle"></ha-icon>
+                                                              </ha-assist-chip>
+                                                          `
+                                                        : nothing}
+                                                </ha-chip-set>
+                                                ${!isExpanded ? html`<div class="preview">${preview}</div>` : nothing}
+                                            </div>
+                                            <span class="time">${formatTimestamp(chat.created_at)}</span>
+                                        </div>
+                                        ${isExpanded
+                                            ? html`
+                                              <div class="comparison">
+                                                  <section class="panel">
+                                                      <h4>Original</h4>
+                                                      <div class="messages-list">
+                                                          ${orderedMessages.map((msg) => html`
+                                                              <intentsity-chat-message .message=${msg}></intentsity-chat-message>
+                                                          `)}
+                                                      </div>
+                                                  </section>
+                                                  <section class="panel">
+                                                      <h4>Corrected</h4>
+                                                      ${(this.drafts[chatId] ?? []).map((draft, index) => html`
+                                                          <div class="draft-message">
+                                                              <div class="draft-controls">
+                                                                  <ha-button @click=${() => this.moveDraft(chatId, index, -1)}>
+                                                                      <ha-icon icon="mdi:arrow-up"></ha-icon>
+                                                                      Up
+                                                                  </ha-button>
+                                                                  <ha-button @click=${() => this.moveDraft(chatId, index, 1)}>
+                                                                      <ha-icon icon="mdi:arrow-down"></ha-icon>
+                                                                      Down
+                                                                  </ha-button>
+                                                                  <ha-button @click=${() => this.removeDraft(chatId, index)}>
+                                                                      <ha-icon icon="mdi:delete"></ha-icon>
+                                                                      Remove
+                                                                  </ha-button>
+                                                                  ${draft.original_message_id
+                                                                      ? html`
+                                                                            <ha-chip-set class="chip-row">
+                                                                                <ha-assist-chip label="Original #${draft.original_message_id}" hasIcon>
+                                                                                    <ha-icon slot="icon" icon="mdi:message-text"></ha-icon>
+                                                                                </ha-assist-chip>
+                                                                            </ha-chip-set>
+                                                                        `
+                                                                      : html`
+                                                                            <ha-chip-set class="chip-row">
+                                                                                <ha-assist-chip label="New message" hasIcon>
+                                                                                    <ha-icon slot="icon" icon="mdi:plus"></ha-icon>
+                                                                                </ha-assist-chip>
+                                                                            </ha-chip-set>
+                                                                        `}
+                                                              </div>
+                                                              <ha-textfield
+                                                                  label="Sender"
+                                                                  .value=${draft.sender}
+                                                                  @input=${(event: Event) =>
+                                                                      this.updateDraft(
+                                                                          chatId,
+                                                                          index,
+                                                                          { sender: (event.target as HTMLInputElement).value },
+                                                                      )}
+                                                              ></ha-textfield>
+                                                              <div class="field-row">
+                                                                  <ha-textfield
+                                                                      label="Message"
+                                                                      .value=${draft.text}
+                                                                      @input=${(event: Event) =>
+                                                                          this.updateDraft(
+                                                                              chatId,
+                                                                              index,
+                                                                              { text: (event.target as HTMLInputElement).value },
+                                                                          )}
+                                                                      multiline
+                                                                  ></ha-textfield>
+                                                                  <ha-button @click=${() => this.openDialog(chatId, index, "text")}>
+                                                                      <ha-icon icon="mdi:pencil"></ha-icon>
+                                                                  </ha-button>
+                                                              </div>
+                                                              <div class="field-row">
+                                                                  <ha-textfield
+                                                                      label="Metadata (JSON)"
+                                                                      .value=${draft.dataText}
+                                                                      @input=${(event: Event) =>
+                                                                          this.updateDraft(
+                                                                              chatId,
+                                                                              index,
+                                                                              { dataText: (event.target as HTMLInputElement).value },
+                                                                          )}
+                                                                      multiline
+                                                                  ></ha-textfield>
+                                                                  <ha-button @click=${() => this.openDialog(chatId, index, "data")}>
+                                                                      <ha-icon icon="mdi:pencil"></ha-icon>
+                                                                  </ha-button>
+                                                              </div>
+                                                          </div>
+                                                      `)}
+                                                      <div class="save-row">
+                                                          <div class="draft-controls">
+                                                              <ha-button @click=${() => this.addDraft(chatId)}>
+                                                                  <ha-icon icon="mdi:plus-circle"></ha-icon>
+                                                                  Add message
+                                                              </ha-button>
+                                                          </div>
+                                                          <ha-button
+                                                              @click=${() => void this.handleSave(chatId)}
+                                                              ?disabled=${this.saving[chatId]}
+                                                          >
+                                                              <ha-icon icon="mdi:content-save"></ha-icon>
+                                                              ${this.saving[chatId] ? "Saving..." : "Save corrections"}
+                                                          </ha-button>
+                                                      </div>
+                                                      ${this.errors[chatId] ? html`<div class="error">${this.errors[chatId]}</div>` : nothing}
+                                                  </section>
+                                              </div>
+                                          `
+                                            : nothing}
+                                    </div>
+                                </ha-card>
+                            `;
+                        })}
+                    </section>
+                `)}
             </div>
             ${this.toastMessage
                 ? html`
@@ -944,11 +1049,16 @@ class IntentsityPanel extends LitElement {
         } as any) as any));
     }
 
-    private async saveCorrected(chatId: string, messages: CorrectedChatMessage[]): Promise<void> {
+    private async saveCorrected(
+        conversationId: string,
+        pipelineRunId: string,
+        messages: CorrectedChatMessage[],
+    ): Promise<void> {
         const conn = await this.getConnection();
         await conn.sendMessagePromise({
             type: SAVE_CORRECTED_COMMAND,
-            conversation_id: chatId,
+            conversation_id: conversationId,
+            pipeline_run_id: pipelineRunId,
             messages,
         });
     }

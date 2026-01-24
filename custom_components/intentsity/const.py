@@ -1,7 +1,7 @@
 DOMAIN = "intentsity"
 
 DB_NAME = "intentsity.db"
-DB_SCHEMA_VERSION = 3
+DB_SCHEMA_VERSION = 5
 
 COORDINATOR_KEY = "coordinator"
 

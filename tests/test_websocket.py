@@ -33,6 +33,8 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
     chat = Chat(
         created_at=now,
         conversation_id="conv-1",
+        pipeline_run_id="run-1",
+        run_timestamp=now,
         messages=[ChatMessage(timestamp=now, sender="user", text="Hi")],
     )
 
@@ -53,6 +55,8 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
     msg_id, payload = conn.results[0]
     assert msg_id == 1
     assert payload["chats"][0]["conversation_id"] == "conv-1"
+    assert payload["chats"][0]["pipeline_run_id"] == "run-1"
+    assert payload["chats"][0]["run_timestamp"] == now.isoformat()
 
 
 @pytest.mark.asyncio
@@ -83,8 +87,9 @@ async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
 async def test_websocket_save_corrected_chat(hass, monkeypatch) -> None:
     saved: dict[str, object] = {}
 
-    def _upsert_corrected_chat(_hass, conversation_id, messages):
+    def _upsert_corrected_chat(_hass, conversation_id, pipeline_run_id, messages):
         saved["conversation_id"] = conversation_id
+        saved["pipeline_run_id"] = pipeline_run_id
         saved["messages"] = messages
 
     monkeypatch.setattr(websocket, "upsert_corrected_chat", _upsert_corrected_chat)
@@ -94,6 +99,7 @@ async def test_websocket_save_corrected_chat(hass, monkeypatch) -> None:
         "id": 3,
         "type": WS_CMD_SAVE_CORRECTED_CHAT,
         "conversation_id": "conv-save",
+        "pipeline_run_id": "run-save",
         "messages": [
             {
                 "original_message_id": 1,
@@ -109,5 +115,6 @@ async def test_websocket_save_corrected_chat(hass, monkeypatch) -> None:
     await hass.async_block_till_done()
 
     assert saved["conversation_id"] == "conv-save"
+    assert saved["pipeline_run_id"] == "run-save"
     assert len(saved["messages"]) == 1
     assert conn.results == [(3, None)]

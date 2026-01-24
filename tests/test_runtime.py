@@ -38,11 +38,14 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
 
     from custom_components.intentsity.models import Chat, ChatMessage
 
-    conversation_id = db.upsert_chat(
+    run_timestamp = datetime.now(timezone.utc)
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
             conversation_id="conv-1",
+            pipeline_run_id="run-1",
+            run_timestamp=run_timestamp,
             messages=[
                 ChatMessage(
                     timestamp=datetime.now(timezone.utc),
@@ -56,6 +59,7 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
     db.upsert_chat_message(
         hass,
         conversation_id,
+        pipeline_run_id,
         ChatMessage(
             timestamp=datetime.now(timezone.utc),
             sender="assistant",
@@ -66,6 +70,8 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
     chats = db.fetch_recent_chats(hass, 10)
     assert len(chats) == 1
     assert chats[0].conversation_id == "conv-1"
+    assert chats[0].pipeline_run_id == "run-1"
+    assert chats[0].run_timestamp == run_timestamp
     assert len(chats[0].messages) == 2
     assert chats[0].messages[0].text == "Hello"
     assert chats[0].messages[1].text == "Hi there"
@@ -82,11 +88,13 @@ async def test_corrected_chat_persists_with_reordered_messages(
         CorrectedChatMessage,
     )
 
-    conversation_id = db.upsert_chat(
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
             conversation_id="conv-2",
+            pipeline_run_id="run-2",
+            run_timestamp=datetime.now(timezone.utc),
             messages=[
                 ChatMessage(
                     timestamp=datetime.now(timezone.utc),
@@ -121,12 +129,16 @@ async def test_corrected_chat_persists_with_reordered_messages(
         ),
     ]
 
-    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+    db.upsert_corrected_chat(
+        hass, conversation_id, pipeline_run_id, corrected_messages
+    )
 
     chats = db.fetch_recent_chats(hass, 1)
     assert chats[0].corrected is not None
     assert chats[0].corrected.original_conversation_id == conversation_id
+    assert chats[0].corrected.original_pipeline_run_id == pipeline_run_id
     assert chats[0].corrected.conversation_id == conversation_id
+    assert chats[0].corrected.pipeline_run_id == pipeline_run_id
     assert [msg.original_message_id for msg in chats[0].corrected.messages] == [
         original_message_ids[1],
         original_message_ids[0],
@@ -140,11 +152,13 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     from custom_components.intentsity.models import Chat, ChatMessage
 
     timestamp = datetime.now(timezone.utc)
-    conversation_id = db.upsert_chat(
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=timestamp,
             conversation_id="conv-3",
+            pipeline_run_id="run-3",
+            run_timestamp=timestamp,
             messages=[
                 ChatMessage(
                     timestamp=timestamp,
@@ -168,7 +182,9 @@ async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
             text="Follow-up",
         ),
     ]
-    db.replace_chat_messages(hass, conversation_id, replacement)
+    db.replace_chat_messages(
+        hass, conversation_id, pipeline_run_id, replacement
+    )
 
     chats = db.fetch_recent_chats(hass, 1)
     assert len(chats[0].messages) == 2
@@ -185,11 +201,13 @@ async def test_count_uncorrected_chats(hass: HomeAssistant) -> None:
         CorrectedChatMessage,
     )
 
-    conversation_id = db.upsert_chat(
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
             conversation_id="conv-count",
+            pipeline_run_id="run-count",
+            run_timestamp=datetime.now(timezone.utc),
             messages=[
                 ChatMessage(
                     timestamp=datetime.now(timezone.utc),
@@ -210,7 +228,9 @@ async def test_count_uncorrected_chats(hass: HomeAssistant) -> None:
             text="Fixed",
         )
     ]
-    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+    db.upsert_corrected_chat(
+        hass, conversation_id, pipeline_run_id, corrected_messages
+    )
     assert db.count_uncorrected_chats(hass) == 0
 
 
@@ -223,11 +243,13 @@ async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) 
         CorrectedChatMessage,
     )
 
-    conversation_id = db.upsert_chat(
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
             conversation_id="conv-delete",
+            pipeline_run_id="run-delete",
+            run_timestamp=datetime.now(timezone.utc),
             messages=[
                 ChatMessage(
                     timestamp=datetime.now(timezone.utc),
@@ -246,9 +268,11 @@ async def test_delete_chat_cascades_messages_and_corrected(hass: HomeAssistant) 
             text="Fixed",
         )
     ]
-    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+    db.upsert_corrected_chat(
+        hass, conversation_id, pipeline_run_id, corrected_messages
+    )
 
-    db.delete_chat(hass, conversation_id)
+    db.delete_chat(hass, conversation_id, pipeline_run_id)
 
     chats = db.fetch_recent_chats(hass, 10)
     assert not chats
@@ -263,11 +287,13 @@ async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> N
         CorrectedChatMessage,
     )
 
-    conversation_id = db.upsert_chat(
+    conversation_id, pipeline_run_id = db.upsert_chat(
         hass,
         Chat(
             created_at=datetime.now(timezone.utc),
             conversation_id="conv-corrected-delete",
+            pipeline_run_id="run-corrected-delete",
+            run_timestamp=datetime.now(timezone.utc),
             messages=[
                 ChatMessage(
                     timestamp=datetime.now(timezone.utc),
@@ -286,9 +312,11 @@ async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> N
             text="Fixed",
         )
     ]
-    db.upsert_corrected_chat(hass, conversation_id, corrected_messages)
+    db.upsert_corrected_chat(
+        hass, conversation_id, pipeline_run_id, corrected_messages
+    )
 
-    db.delete_corrected_chat(hass, conversation_id)
+    db.delete_corrected_chat(hass, conversation_id, pipeline_run_id)
 
     chats = db.fetch_recent_chats(hass, 1)
     assert chats[0].corrected is None

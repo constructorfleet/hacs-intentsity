@@ -109,6 +109,7 @@ def websocket_subscribe_chats(
     {
         vol.Required("type"): WS_CMD_SAVE_CORRECTED_CHAT,
         vol.Required("conversation_id"): vol.Coerce(str),
+        vol.Required("pipeline_run_id"): vol.Coerce(str),
         vol.Required("messages"): list,
     }
 )
@@ -126,6 +127,7 @@ def websocket_save_corrected_chat(
             upsert_corrected_chat,
             hass,
             request.conversation_id,
+            request.pipeline_run_id,
             request.messages,
         )
         async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)

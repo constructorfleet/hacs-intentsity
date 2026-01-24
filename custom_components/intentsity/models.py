@@ -34,7 +34,9 @@ class CorrectedChatMessage(BaseModel):
 
 class CorrectedChat(BaseModel):
     conversation_id: str
+    pipeline_run_id: str
     original_conversation_id: str
+    original_pipeline_run_id: str
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
     messages: list[CorrectedChatMessage] = Field(default_factory=list)
@@ -42,6 +44,8 @@ class CorrectedChat(BaseModel):
 
 class Chat(BaseModel):
     conversation_id: str
+    pipeline_run_id: str
+    run_timestamp: datetime = Field(default_factory=_utcnow)
     created_at: datetime = Field(default_factory=_utcnow)
     messages: list[ChatMessage] = Field(default_factory=list)
     corrected: CorrectedChat | None = None
@@ -53,6 +57,7 @@ class ChatListResponse(BaseModel):
 
 class CorrectedChatSaveRequest(BaseModel):
     conversation_id: str
+    pipeline_run_id: str
     messages: list[CorrectedChatMessage]
 
 

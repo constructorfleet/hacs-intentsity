@@ -17,5 +17,5 @@
         "sqlalchemy>=2.0.0",
         "voluptuous>=0.13.1"
     ],
-    "version": "0.5.0"
+    "version": "0.6.1"
 }

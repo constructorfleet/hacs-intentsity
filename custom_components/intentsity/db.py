@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -53,8 +54,19 @@ class _DBBase(DeclarativeBase):
 # New chat-centric schema
 class ChatRow(_DBBase):
     __tablename__ = "chats"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "pipeline_run_id",
+            name="uniq_chats_conversation_pipeline",
+        ),
+    )
 
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
+    pipeline_run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    run_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
@@ -62,7 +74,7 @@ class ChatRow(_DBBase):
         back_populates="chat",
         cascade="all, delete-orphan",
         lazy="selectin",
-        order_by="ChatMessageRow.position, ChatMessageRow.id",
+        order_by="ChatMessageRow.timestamp, ChatMessageRow.id",
     )
     corrected: Mapped["CorrectedChatRow | None"] = relationship(
         back_populates="original_chat",
@@ -74,11 +86,17 @@ class ChatRow(_DBBase):
 
 class ChatMessageRow(_DBBase):
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["chat_id", "pipeline_run_id"],
+            ["chats.conversation_id", "chats.pipeline_run_id"],
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    chat_id: Mapped[str] = mapped_column(
-        ForeignKey("chats.conversation_id", ondelete="CASCADE")
-    )
+    chat_id: Mapped[str] = mapped_column(String)
+    pipeline_run_id: Mapped[str] = mapped_column(String)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, index=True
@@ -94,14 +112,21 @@ class CorrectedChatRow(_DBBase):
     __tablename__ = "corrected_chats"
     __table_args__ = (
         UniqueConstraint(
-            "original_conversation_id", name="uniq_corrected_original_conversation"
+            "original_conversation_id",
+            "original_pipeline_run_id",
+            name="uniq_corrected_original_conversation",
+        ),
+        ForeignKeyConstraint(
+            ["original_conversation_id", "original_pipeline_run_id"],
+            ["chats.conversation_id", "chats.pipeline_run_id"],
+            ondelete="CASCADE",
         ),
     )
 
     conversation_id: Mapped[str] = mapped_column(String, primary_key=True)
-    original_conversation_id: Mapped[str] = mapped_column(
-        ForeignKey("chats.conversation_id", ondelete="CASCADE"), index=True
-    )
+    pipeline_run_id: Mapped[str] = mapped_column(String, primary_key=True)
+    original_conversation_id: Mapped[str] = mapped_column(String, index=True)
+    original_pipeline_run_id: Mapped[str] = mapped_column(String, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
@@ -119,11 +144,17 @@ class CorrectedChatRow(_DBBase):
 
 class CorrectedChatMessageRow(_DBBase):
     __tablename__ = "corrected_chat_messages"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["corrected_chat_id", "corrected_pipeline_run_id"],
+            ["corrected_chats.conversation_id", "corrected_chats.pipeline_run_id"],
+            ondelete="CASCADE",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    corrected_chat_id: Mapped[str] = mapped_column(
-        ForeignKey("corrected_chats.conversation_id", ondelete="CASCADE")
-    )
+    corrected_chat_id: Mapped[str] = mapped_column(String)
+    corrected_pipeline_run_id: Mapped[str] = mapped_column(String)
     original_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("chat_messages.id", ondelete="SET NULL"),
         nullable=True,
@@ -177,30 +208,89 @@ class IntentsityDBClient:
                             "ALTER TABLE chat_messages ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
                         )
                     )
+                chat_messages_columns = columns
+            else:
+                chat_messages_columns = set()
 
-            chats_columns = _columns("chats") if _table_exists("chats") else set()
-            if "id" in chats_columns:
+            chats_exists = _table_exists("chats")
+            chats_columns = _columns("chats") if chats_exists else set()
+            needs_chat_migration = chats_exists and (
+                "id" in chats_columns
+                or "pipeline_run_id" not in chats_columns
+                or "pipeline_run_id" not in chat_messages_columns
+                or "run_timestamp" not in chats_columns
+            )
+            if needs_chat_migration:
                 conn.execute(text("PRAGMA foreign_keys=OFF"))
 
                 conn.execute(
                     text(
                         """
                         CREATE TABLE chats_new (
-                            conversation_id TEXT PRIMARY KEY,
-                            created_at DATETIME
+                            conversation_id TEXT NOT NULL,
+                            pipeline_run_id TEXT NOT NULL,
+                            run_timestamp DATETIME,
+                            created_at DATETIME,
+                            PRIMARY KEY (conversation_id, pipeline_run_id)
                         )
                         """
                     )
                 )
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO chats_new (conversation_id, created_at)
-                        SELECT COALESCE(conversation_id, 'legacy-' || id), created_at
-                        FROM chats
-                        """
+                if chats_exists:
+                    if "id" in chats_columns:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO chats_new (conversation_id, pipeline_run_id, run_timestamp, created_at)
+                                SELECT
+                                    COALESCE(conversation_id, 'legacy-' || id),
+                                    'legacy',
+                                    created_at,
+                                    created_at
+                                FROM chats
+                                """
+                            )
+                        )
+                        chat_join = "chats.id = chat_messages.chat_id"
+                        chat_id_expr = "COALESCE(chats.conversation_id, 'legacy-' || chats.id)"
+                        corrected_chat_join = (
+                            "chats.id = corrected_chats.original_chat_id"
+                        )
+                        corrected_chat_id_expr = (
+                            "COALESCE(chats.conversation_id, 'legacy-' || chats.id)"
+                        )
+                        corrected_message_join = (
+                            "corrected_chats.id = corrected_chat_messages.corrected_chat_id"
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO chats_new (conversation_id, pipeline_run_id, run_timestamp, created_at)
+                                SELECT conversation_id, 'legacy', created_at, created_at
+                                FROM chats
+                                """
+                            )
+                        )
+                        chat_join = "chats.conversation_id = chat_messages.chat_id"
+                        chat_id_expr = "chat_messages.chat_id"
+                        corrected_chat_join = (
+                            "corrected_chats.original_conversation_id = chats.conversation_id"
+                        )
+                        corrected_chat_id_expr = "corrected_chats.conversation_id"
+                        corrected_message_join = (
+                            "corrected_chats.conversation_id = corrected_chat_messages.corrected_chat_id"
+                        )
+                else:
+                    chat_join = "chats.conversation_id = chat_messages.chat_id"
+                    chat_id_expr = "chat_messages.chat_id"
+                    corrected_chat_join = (
+                        "corrected_chats.original_conversation_id = chats.conversation_id"
                     )
-                )
+                    corrected_chat_id_expr = "corrected_chats.conversation_id"
+                    corrected_message_join = (
+                        "corrected_chats.conversation_id = corrected_chat_messages.corrected_chat_id"
+                    )
 
                 conn.execute(
                     text(
@@ -208,67 +298,108 @@ class IntentsityDBClient:
                         CREATE TABLE chat_messages_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             chat_id TEXT NOT NULL,
+                            pipeline_run_id TEXT NOT NULL,
                             position INTEGER NOT NULL DEFAULT 0,
                             timestamp DATETIME,
                             sender TEXT NOT NULL,
                             text TEXT NOT NULL,
                             data TEXT,
-                            FOREIGN KEY(chat_id) REFERENCES chats_new(conversation_id) ON DELETE CASCADE
+                            FOREIGN KEY(chat_id, pipeline_run_id)
+                                REFERENCES chats_new(conversation_id, pipeline_run_id)
+                                ON DELETE CASCADE
                         )
                         """
                     )
                 )
-                conn.execute(
-                    text(
-                        """
-                        INSERT INTO chat_messages_new (
-                            id, chat_id, position, timestamp, sender, text, data
+                if _table_exists("chat_messages") and chats_exists:
+                    conn.execute(
+                        text(
+                            f"""
+                            INSERT INTO chat_messages_new (
+                                id, chat_id, pipeline_run_id, position, timestamp, sender, text, data
+                            )
+                            SELECT
+                                chat_messages.id,
+                                {chat_id_expr},
+                                'legacy',
+                                chat_messages.position,
+                                chat_messages.timestamp,
+                                chat_messages.sender,
+                                chat_messages.text,
+                                chat_messages.data
+                            FROM chat_messages
+                            JOIN chats ON {chat_join}
+                            """
                         )
-                        SELECT
-                            chat_messages.id,
-                            COALESCE(chats.conversation_id, 'legacy-' || chats.id),
-                            chat_messages.position,
-                            chat_messages.timestamp,
-                            chat_messages.sender,
-                            chat_messages.text,
-                            chat_messages.data
-                        FROM chat_messages
-                        JOIN chats ON chats.id = chat_messages.chat_id
-                        """
                     )
-                )
 
                 conn.execute(
                     text(
                         """
                         CREATE TABLE corrected_chats_new (
-                            conversation_id TEXT PRIMARY KEY,
+                            conversation_id TEXT NOT NULL,
+                            pipeline_run_id TEXT NOT NULL,
                             original_conversation_id TEXT NOT NULL,
+                            original_pipeline_run_id TEXT NOT NULL,
                             created_at DATETIME,
                             updated_at DATETIME,
-                            UNIQUE(original_conversation_id),
-                            FOREIGN KEY(original_conversation_id) REFERENCES chats_new(conversation_id) ON DELETE CASCADE
+                            UNIQUE(original_conversation_id, original_pipeline_run_id),
+                            PRIMARY KEY (conversation_id, pipeline_run_id),
+                            FOREIGN KEY(original_conversation_id, original_pipeline_run_id)
+                                REFERENCES chats_new(conversation_id, pipeline_run_id)
+                                ON DELETE CASCADE
                         )
                         """
                     )
                 )
                 if _table_exists("corrected_chats"):
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO corrected_chats_new (
-                                conversation_id, original_conversation_id, created_at, updated_at
+                    if "id" in chats_columns:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO corrected_chats_new (
+                                    conversation_id,
+                                    pipeline_run_id,
+                                    original_conversation_id,
+                                    original_pipeline_run_id,
+                                    created_at,
+                                    updated_at
+                                )
+                                SELECT
+                                    {corrected_chat_id_expr},
+                                    'legacy',
+                                    {corrected_chat_id_expr},
+                                    'legacy',
+                                    corrected_chats.created_at,
+                                    corrected_chats.updated_at
+                                FROM corrected_chats
+                                JOIN chats ON {corrected_chat_join}
+                                """
                             )
-                            SELECT
-                                COALESCE(chats.conversation_id, 'legacy-' || chats.id),
-                                COALESCE(chats.conversation_id, 'legacy-' || chats.id),
-                                corrected_chats.created_at,
-                                corrected_chats.updated_at
-                            FROM corrected_chats
-                            JOIN chats ON chats.id = corrected_chats.original_chat_id
-                            """
                         )
-                    )
+                    else:
+                        conn.execute(
+                            text(
+                                """
+                                INSERT INTO corrected_chats_new (
+                                    conversation_id,
+                                    pipeline_run_id,
+                                    original_conversation_id,
+                                    original_pipeline_run_id,
+                                    created_at,
+                                    updated_at
+                                )
+                                SELECT
+                                    corrected_chats.conversation_id,
+                                    'legacy',
+                                    corrected_chats.original_conversation_id,
+                                    'legacy',
+                                    corrected_chats.created_at,
+                                    corrected_chats.updated_at
+                                FROM corrected_chats
+                                """
+                            )
+                        )
 
                 conn.execute(
                     text(
@@ -276,49 +407,86 @@ class IntentsityDBClient:
                         CREATE TABLE corrected_chat_messages_new (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
                             corrected_chat_id TEXT NOT NULL,
+                            corrected_pipeline_run_id TEXT NOT NULL,
                             original_message_id INTEGER,
                             position INTEGER NOT NULL DEFAULT 0,
                             timestamp DATETIME,
                             sender TEXT NOT NULL,
                             text TEXT NOT NULL,
                             data TEXT,
-                            FOREIGN KEY(corrected_chat_id) REFERENCES corrected_chats_new(conversation_id) ON DELETE CASCADE,
+                            FOREIGN KEY(corrected_chat_id, corrected_pipeline_run_id)
+                                REFERENCES corrected_chats_new(conversation_id, pipeline_run_id)
+                                ON DELETE CASCADE,
                             FOREIGN KEY(original_message_id) REFERENCES chat_messages_new(id) ON DELETE SET NULL
                         )
                         """
                     )
                 )
                 if _table_exists("corrected_chat_messages"):
-                    conn.execute(
-                        text(
-                            """
-                            INSERT INTO corrected_chat_messages_new (
-                                id,
-                                corrected_chat_id,
-                                original_message_id,
-                                position,
-                                timestamp,
-                                sender,
-                                text,
-                                data
+                    if "id" in chats_columns:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO corrected_chat_messages_new (
+                                    id,
+                                    corrected_chat_id,
+                                    corrected_pipeline_run_id,
+                                    original_message_id,
+                                    position,
+                                    timestamp,
+                                    sender,
+                                    text,
+                                    data
+                                )
+                                SELECT
+                                    corrected_chat_messages.id,
+                                    {corrected_chat_id_expr},
+                                    'legacy',
+                                    corrected_chat_messages.original_message_id,
+                                    corrected_chat_messages.position,
+                                    corrected_chat_messages.timestamp,
+                                    corrected_chat_messages.sender,
+                                    corrected_chat_messages.text,
+                                    corrected_chat_messages.data
+                                FROM corrected_chat_messages
+                                JOIN corrected_chats
+                                    ON {corrected_message_join}
+                                JOIN chats
+                                    ON {corrected_chat_join}
+                                """
                             )
-                            SELECT
-                                corrected_chat_messages.id,
-                                COALESCE(chats.conversation_id, 'legacy-' || chats.id),
-                                corrected_chat_messages.original_message_id,
-                                corrected_chat_messages.position,
-                                corrected_chat_messages.timestamp,
-                                corrected_chat_messages.sender,
-                                corrected_chat_messages.text,
-                                corrected_chat_messages.data
-                            FROM corrected_chat_messages
-                            JOIN corrected_chats
-                                ON corrected_chats.id = corrected_chat_messages.corrected_chat_id
-                            JOIN chats
-                                ON chats.id = corrected_chats.original_chat_id
-                            """
                         )
-                    )
+                    else:
+                        conn.execute(
+                            text(
+                                f"""
+                                INSERT INTO corrected_chat_messages_new (
+                                    id,
+                                    corrected_chat_id,
+                                    corrected_pipeline_run_id,
+                                    original_message_id,
+                                    position,
+                                    timestamp,
+                                    sender,
+                                    text,
+                                    data
+                                )
+                                SELECT
+                                    corrected_chat_messages.id,
+                                    corrected_chats.conversation_id,
+                                    'legacy',
+                                    corrected_chat_messages.original_message_id,
+                                    corrected_chat_messages.position,
+                                    corrected_chat_messages.timestamp,
+                                    corrected_chat_messages.sender,
+                                    corrected_chat_messages.text,
+                                    corrected_chat_messages.data
+                                FROM corrected_chat_messages
+                                JOIN corrected_chats
+                                    ON {corrected_message_join}
+                                """
+                            )
+                        )
 
                 conn.execute(text("DROP TABLE IF EXISTS corrected_chat_messages"))
                 conn.execute(text("DROP TABLE IF EXISTS corrected_chats"))
@@ -341,12 +509,14 @@ class IntentsityDBClient:
                 conn.execute(text("PRAGMA foreign_keys=ON"))
 
     # New chat persistence methods
-    def upsert_chat(self, chat: Chat) -> str:
+    def upsert_chat(self, chat: Chat) -> tuple[str, str]:
         engine = self._get_engine()
         with Session(engine) as session:
             chat_row = ChatRow(
                 created_at=chat.created_at,
                 conversation_id=chat.conversation_id,
+                pipeline_run_id=chat.pipeline_run_id,
+                run_timestamp=chat.run_timestamp,
             )
             try:
                 session.merge(chat_row)
@@ -355,6 +525,7 @@ class IntentsityDBClient:
                     msg_row = ChatMessageRow(
                         id=msg.id,
                         chat_id=chat.conversation_id,
+                        pipeline_run_id=chat.pipeline_run_id,
                         position=msg.position if msg.position is not None else index,
                         timestamp=msg.timestamp,
                         sender=msg.sender,
@@ -365,15 +536,23 @@ class IntentsityDBClient:
                 session.commit()
             except IntegrityError:
                 session.rollback()
-                existing = session.get(ChatRow, chat.conversation_id)
+                existing = session.get(
+                    ChatRow,
+                    {
+                        "conversation_id": chat.conversation_id,
+                        "pipeline_run_id": chat.pipeline_run_id,
+                    },
+                )
                 if existing is None:
                     raise
                 existing.created_at = chat.created_at
+                existing.run_timestamp = chat.run_timestamp
                 session.flush()
                 for index, msg in enumerate(chat.messages):
                     msg_row = ChatMessageRow(
                         id=msg.id,
                         chat_id=chat.conversation_id,
+                        pipeline_run_id=chat.pipeline_run_id,
                         position=msg.position if msg.position is not None else index,
                         timestamp=msg.timestamp,
                         sender=msg.sender,
@@ -382,22 +561,29 @@ class IntentsityDBClient:
                     )
                     session.merge(msg_row)
                 session.commit()
-            return chat.conversation_id
+            return chat.conversation_id, chat.pipeline_run_id
 
-    def upsert_chat_message(self, chat_id: str, message: ChatMessage) -> int:
+    def upsert_chat_message(
+        self,
+        conversation_id: str,
+        pipeline_run_id: str,
+        message: ChatMessage,
+    ) -> int:
         engine = self._get_engine()
         with Session(engine) as session:
             position = message.position
             if position is None:
                 max_position = session.scalar(
                     select(func.max(ChatMessageRow.position)).where(
-                        ChatMessageRow.chat_id == chat_id
+                        ChatMessageRow.chat_id == conversation_id,
+                        ChatMessageRow.pipeline_run_id == pipeline_run_id,
                     )
                 )
                 position = (max_position or 0) + 1
             msg_row = ChatMessageRow(
                 id=message.id,
-                chat_id=chat_id,
+                chat_id=conversation_id,
+                pipeline_run_id=pipeline_run_id,
                 position=position,
                 timestamp=message.timestamp,
                 sender=message.sender,
@@ -408,15 +594,22 @@ class IntentsityDBClient:
             session.commit()
             return merged.id
 
-    def replace_chat_messages(self, chat_id: str, messages: list[ChatMessage]) -> None:
+    def replace_chat_messages(
+        self,
+        conversation_id: str,
+        pipeline_run_id: str,
+        messages: list[ChatMessage],
+    ) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
             session.query(ChatMessageRow).filter(
-                ChatMessageRow.chat_id == chat_id
+                ChatMessageRow.chat_id == conversation_id,
+                ChatMessageRow.pipeline_run_id == pipeline_run_id,
             ).delete()
             for index, msg in enumerate(messages):
                 msg_row = ChatMessageRow(
-                    chat_id=chat_id,
+                    chat_id=conversation_id,
+                    pipeline_run_id=pipeline_run_id,
                     position=msg.position if msg.position is not None else index,
                     timestamp=msg.timestamp,
                     sender=msg.sender,
@@ -429,19 +622,23 @@ class IntentsityDBClient:
     def upsert_corrected_chat(
         self,
         original_conversation_id: str,
+        original_pipeline_run_id: str,
         messages: list[CorrectedChatMessage],
     ) -> str:
         engine = self._get_engine()
         with Session(engine) as session:
             stmt = select(CorrectedChatRow).where(
-                CorrectedChatRow.original_conversation_id == original_conversation_id
+                CorrectedChatRow.original_conversation_id == original_conversation_id,
+                CorrectedChatRow.original_pipeline_run_id == original_pipeline_run_id,
             )
             corrected = session.scalars(stmt).first()
             now = _utcnow()
             if corrected is None:
                 corrected = CorrectedChatRow(
                     conversation_id=original_conversation_id,
+                    pipeline_run_id=original_pipeline_run_id,
                     original_conversation_id=original_conversation_id,
+                    original_pipeline_run_id=original_pipeline_run_id,
                     created_at=now,
                     updated_at=now,
                 )
@@ -455,6 +652,7 @@ class IntentsityDBClient:
             for index, msg in enumerate(messages):
                 msg_row = CorrectedChatMessageRow(
                     corrected_chat_id=corrected.conversation_id,
+                    corrected_pipeline_run_id=corrected.pipeline_run_id,
                     original_message_id=msg.original_message_id,
                     position=index,
                     timestamp=msg.timestamp,
@@ -466,13 +664,12 @@ class IntentsityDBClient:
             session.commit()
             return corrected.conversation_id
 
-    def fetch_recent_chats(self, limit: int) -> list[Chat]:
+    def fetch_recent_chats(self, limit: int | None = None) -> list[Chat]:
         engine = self._get_engine()
         with Session(engine) as session:
             stmt = (
                 select(ChatRow)
                 .order_by(ChatRow.created_at.desc())
-                .limit(limit)
                 .options(
                     selectinload(ChatRow.messages),
                     selectinload(ChatRow.corrected).selectinload(
@@ -480,6 +677,8 @@ class IntentsityDBClient:
                     ),
                 )
             )
+            if limit:
+                stmt = stmt.limit(limit)
             rows = session.scalars(stmt).all()
         return [_row_to_chat(row) for row in rows]
 
@@ -510,26 +709,44 @@ class IntentsityDBClient:
                 select(func.count(ChatRow.conversation_id))
                 .outerjoin(
                     CorrectedChatRow,
-                    CorrectedChatRow.original_conversation_id
-                    == ChatRow.conversation_id,
+                    (
+                        CorrectedChatRow.original_conversation_id
+                        == ChatRow.conversation_id
+                    )
+                    & (
+                        CorrectedChatRow.original_pipeline_run_id
+                        == ChatRow.pipeline_run_id
+                    ),
                 )
                 .where(CorrectedChatRow.conversation_id.is_(None))
             )
             return int(session.scalar(stmt) or 0)
 
-    def delete_chat(self, conversation_id: str) -> None:
+    def delete_chat(self, conversation_id: str, pipeline_run_id: str) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
-            chat_row = session.get(ChatRow, conversation_id)
+            chat_row = session.get(
+                ChatRow,
+                {
+                    "conversation_id": conversation_id,
+                    "pipeline_run_id": pipeline_run_id,
+                },
+            )
             if chat_row is None:
                 return
             session.delete(chat_row)
             session.commit()
 
-    def delete_corrected_chat(self, conversation_id: str) -> None:
+    def delete_corrected_chat(self, conversation_id: str, pipeline_run_id: str) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
-            corrected_row = session.get(CorrectedChatRow, conversation_id)
+            corrected_row = session.get(
+                CorrectedChatRow,
+                {
+                    "conversation_id": conversation_id,
+                    "pipeline_run_id": pipeline_run_id,
+                },
+            )
             if corrected_row is None:
                 return
             session.delete(corrected_row)
@@ -579,21 +796,33 @@ def init_db(hass: HomeAssistant) -> None:
     _get_client(hass).ensure_initialized()
 
 
-def upsert_chat(hass: HomeAssistant, chat: Chat) -> str:
+def upsert_chat(hass: HomeAssistant, chat: Chat) -> tuple[str, str]:
     return _get_client(hass).upsert_chat(chat)
 
 
-def upsert_chat_message(hass: HomeAssistant, chat_id: str, message: ChatMessage) -> int:
-    return _get_client(hass).upsert_chat_message(chat_id, message)
+def upsert_chat_message(
+    hass: HomeAssistant,
+    conversation_id: str,
+    pipeline_run_id: str,
+    message: ChatMessage,
+) -> int:
+    return _get_client(hass).upsert_chat_message(
+        conversation_id, pipeline_run_id, message
+    )
 
 
 def replace_chat_messages(
-    hass: HomeAssistant, chat_id: str, messages: list[ChatMessage]
+    hass: HomeAssistant,
+    conversation_id: str,
+    pipeline_run_id: str,
+    messages: list[ChatMessage],
 ) -> None:
-    return _get_client(hass).replace_chat_messages(chat_id, messages)
+    return _get_client(hass).replace_chat_messages(
+        conversation_id, pipeline_run_id, messages
+    )
 
 
-def fetch_recent_chats(hass: HomeAssistant, limit: int) -> list[Chat]:
+def fetch_recent_chats(hass: HomeAssistant, limit: int | None = None) -> list[Chat]:
     return _get_client(hass).fetch_recent_chats(limit)
 
 
@@ -606,21 +835,34 @@ def fetch_latest_chat_by_conversation_id(
 def upsert_corrected_chat(
     hass: HomeAssistant,
     original_conversation_id: str,
+    original_pipeline_run_id: str,
     messages: list[CorrectedChatMessage],
 ) -> str:
-    return _get_client(hass).upsert_corrected_chat(original_conversation_id, messages)
+    return _get_client(hass).upsert_corrected_chat(
+        original_conversation_id, original_pipeline_run_id, messages
+    )
 
 
 def count_uncorrected_chats(hass: HomeAssistant) -> int:
     return _get_client(hass).count_uncorrected_chats()
 
 
-def delete_chat(hass: HomeAssistant, conversation_id: str) -> None:
-    return _get_client(hass).delete_chat(conversation_id)
+def delete_chat(
+    hass: HomeAssistant,
+    conversation_id: str,
+    pipeline_run_id: str,
+) -> None:
+    return _get_client(hass).delete_chat(conversation_id, pipeline_run_id)
 
 
-def delete_corrected_chat(hass: HomeAssistant, conversation_id: str) -> None:
-    return _get_client(hass).delete_corrected_chat(conversation_id)
+def delete_corrected_chat(
+    hass: HomeAssistant,
+    conversation_id: str,
+    pipeline_run_id: str,
+) -> None:
+    return _get_client(hass).delete_corrected_chat(
+        conversation_id, pipeline_run_id
+    )
 
 
 def _row_to_chat(row: ChatRow) -> Chat:
@@ -653,13 +895,17 @@ def _row_to_chat(row: ChatRow) -> Chat:
         ]
         corrected = CorrectedChat(
             conversation_id=row.corrected.conversation_id,
+            pipeline_run_id=row.corrected.pipeline_run_id,
             original_conversation_id=row.corrected.original_conversation_id,
+            original_pipeline_run_id=row.corrected.original_pipeline_run_id,
             created_at=row.corrected.created_at,
             updated_at=row.corrected.updated_at,
             messages=corrected_messages,
         )
     return Chat(
         conversation_id=row.conversation_id,
+        pipeline_run_id=row.pipeline_run_id,
+        run_timestamp=row.run_timestamp,
         created_at=row.created_at,
         messages=messages,
         corrected=corrected,
