@@ -89,21 +89,12 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
             )
         )
     elif "tool_result" in data:
-        tool_result = data.get("tool_result", {})
-        text: str | None = tool_result.get("result", None)
-        if not text:
-            content = tool_result.get("content", None)
-            if isinstance(content, list):
-                text = "\n\n".join([c["text"] for c in content])
-            elif isinstance(content, str):
-                text = content
-
         chat.messages.append(
             ChatMessage(
                 chat_id=chat.conversation_id,
                 timestamp=parse_timestamp(event.timestamp),
                 sender=data.get("role", "tool_result"),
-                text=text or "",
+                text="",
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
