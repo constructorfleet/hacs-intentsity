@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import timedelta
 import functools
 import logging
@@ -172,7 +173,7 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 chat_id=chat.conversation_id,
                 text="\n\n".join([content.content for content in system_content]),
                 data=functools.reduce(
-                    accumulate, [context.as_dict() for context in system_content], {}
+                    accumulate, [asdict(context) for context in system_content], {}
                 ),
             ),
         )
