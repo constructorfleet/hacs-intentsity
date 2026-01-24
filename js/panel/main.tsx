@@ -328,6 +328,11 @@ class IntentsityChatList extends LitElement {
             ha-card {
                 margin-bottom: 16px;
             }
+            .pipeline-run-card {
+                margin-left: 0;
+                margin-right: 0;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+            }
             .chat-header {
                 display: flex;
                 justify-content: space-between;
@@ -472,13 +477,15 @@ class IntentsityChatList extends LitElement {
                 display: flex;
                 flex-direction: column;
                 gap: 16px;
+                padding: 16px;
             }
             .conversation-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: baseline;
                 gap: 12px;
-                padding: 4px 4px 0;
+                padding: 0 0 16px;
+                border-bottom: 1px solid var(--divider-color);
             }
             .conversation-header h3 {
                 margin: 0;
@@ -720,7 +727,8 @@ class IntentsityChatList extends LitElement {
     private getFirstUserSnippet(messages: ChatMessage[]): string {
         const message = messages.find((msg) => msg.sender === "user");
         if (!message) {
-            return "No user messages yet.";
+            const messageCount = messages.length;
+            return `${messageCount} message${messageCount === 1 ? "" : "s"}`;
         }
         const text = message.text ?? "";
         if (text.length <= 100) {
@@ -800,25 +808,26 @@ class IntentsityChatList extends LitElement {
         return html`
             <div class="chat-grid">
                 ${groupChatsByConversation(this.chats).map((group) => html`
-                    <section class="conversation-group">
-                        <div class="conversation-header">
-                            <div class="header-row">
-                                <ha-button
-                                    @click=${() => this.toggleConversation(group.conversation_id)}
-                                    aria-labelledby=${`conversation-heading-${group.conversation_id}`}
-                                >
-                                    <ha-icon
-                                        icon=${this.conversationExpanded[group.conversation_id] ? "mdi:chevron-up" : "mdi:chevron-down"}
-                                    ></ha-icon>
-                                    ${this.conversationExpanded[group.conversation_id] ? "Collapse" : "Expand"}
-                                </ha-button>
-                                <h3 id=${`conversation-heading-${group.conversation_id}`}>Conversation ${group.conversation_id}</h3>
+                    <ha-card>
+                        <section class="conversation-group">
+                            <div class="conversation-header">
+                                <div class="header-row">
+                                    <ha-button
+                                        @click=${() => this.toggleConversation(group.conversation_id)}
+                                        aria-labelledby=${`conversation-heading-${group.conversation_id}`}
+                                    >
+                                        <ha-icon
+                                            icon=${this.conversationExpanded[group.conversation_id] ? "mdi:chevron-up" : "mdi:chevron-down"}
+                                        ></ha-icon>
+                                        ${this.conversationExpanded[group.conversation_id] ? "Collapse" : "Expand"}
+                                    </ha-button>
+                                    <h3 id=${`conversation-heading-${group.conversation_id}`}>Conversation ${group.conversation_id}</h3>
+                                </div>
+                                <span class="conversation-meta">
+                                    ${group.runs.length} run${group.runs.length === 1 ? "" : "s"}
+                                </span>
                             </div>
-                            <span class="conversation-meta">
-                                ${group.runs.length} run${group.runs.length === 1 ? "" : "s"}
-                            </span>
-                        </div>
-                        ${this.conversationExpanded[group.conversation_id] ? group.runs.map((chat) => {
+                            ${this.conversationExpanded[group.conversation_id] ? group.runs.map((chat) => {
                             const chatId = getChatKey(chat);
                             const isExpanded = this.expanded[chatId] ?? false;
                             const orderedMessages = [...chat.messages].sort((a, b) => {
@@ -832,7 +841,7 @@ class IntentsityChatList extends LitElement {
                             const correctedAt = this.getCorrectedAt(chat);
                             const isCorrected = Boolean(correctedAt);
                             return html`
-                                <ha-card class=${isCorrected ? "corrected-card" : ""} data-chat-id=${chatId}>
+                                <ha-card class="pipeline-run-card ${isCorrected ? "corrected-card" : ""}" data-chat-id=${chatId}>
                                     <div class="card-content">
                                         <div class="chat-header">
                                             <div class="header-row">
@@ -977,7 +986,8 @@ class IntentsityChatList extends LitElement {
                                 </ha-card>
                             `;
                         }) : nothing}
-                    </section>
+                        </section>
+                    </ha-card>
                 `)}
             </div>
             ${this.toastMessage
