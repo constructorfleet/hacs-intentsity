@@ -98,29 +98,30 @@ function e(e,t,n,s){var i,r=arguments.length,o=r<3?t:null===s?s=Object.getOwnPro
         .markdown code {
             font-family: var(--code-font-family, monospace);
         }
-    `,e([de({type:String})],In.prototype,"content",void 0),In=e([ce("intentsity-markdown")],In);let zn=class extends ae{constructor(){super(...arguments),this.chats=[],this.drafts={},this.errors={},this.saving={},this.expanded={},this.conversationExpanded={},this.correctedOverrides={},this.toastMessage=null,this.toastKind="success",this.dialogOpen=!1,this.dialogchatId=null,this.dialogIndex=null,this.dialogField=null,this.dialogValue=""}willUpdate(e){if(!e.has("chats"))return;const t=Object.assign({},this.drafts),n=Object.assign({},this.expanded),s=Object.assign({},this.conversationExpanded),i=new Set;this.chats.forEach((e,s)=>{var r,o;const a=On(e);if(i.add(a),t[a])return;const l=(null===(o=null===(r=e.corrected)||void 0===r?void 0:r.messages)||void 0===o?void 0:o.length)?e.corrected.messages:e.messages.map((e,t)=>{var n;return{id:void 0,corrected_chat_id:void 0,original_message_id:e.id,position:t,timestamp:e.timestamp,sender:e.sender,text:e.text,data:null!==(n=e.data)&&void 0!==n?n:{}}});t[a]=l.map(e=>{var t,n;return{original_message_id:null!==(t=e.original_message_id)&&void 0!==t?t:null,timestamp:e.timestamp,sender:e.sender,text:e.text,dataText:(n=e.data,JSON.stringify(null!=n?n:{},null,2))}}),void 0===n[a]&&(n[a]=0===s)});const r=new Set;Rn(this.chats).forEach((e,t)=>{r.add(e.conversation_id),void 0===s[e.conversation_id]&&(s[e.conversation_id]=0===t)}),Object.keys(t).forEach(e=>{i.has(e)||delete t[e]}),Object.keys(n).forEach(e=>{i.has(e)||delete n[e]}),Object.keys(s).forEach(e=>{r.has(e)||delete s[e]}),this.drafts=t,this.expanded=n,this.conversationExpanded=s}getCorrectedAt(e){var t,n;return null!==(t=this.correctedOverrides[On(e)])&&void 0!==t?t:null===(n=e.corrected)||void 0===n?void 0:n.updated_at}showToast(e,t){this.toastMessage=e,this.toastKind=t,window.clearTimeout(this._toastTimer),this._toastTimer=window.setTimeout(()=>{this.toastMessage=null},3e3)}focusChat(e){const t=this.renderRoot.querySelector(`ha-card[data-chat-id="${e}"]`);if(!t)return;t.scrollIntoView({behavior:"smooth",block:"center"});const n=t.querySelector("ha-button");n&&n.focus()}markCorrectedAndAdvance(e){const t=(new Date).toISOString();this.correctedOverrides=Object.assign(Object.assign({},this.correctedOverrides),{[e]:t});const n=this.chats.find(t=>On(t)!==e&&!this.getCorrectedAt(t)),s=n?On(n):void 0;this.expanded=Object.assign(Object.assign(Object.assign({},this.expanded),{[e]:!1}),s?{[s]:!0}:{}),s&&requestAnimationFrame(()=>this.focusChat(s))}updateDraft(e,t,n){const s=this.drafts[e];if(!s)return;const i=[...s];i[t]=Object.assign(Object.assign({},i[t]),n),this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:i})}moveDraft(e,t,n){const s=this.drafts[e];if(!s)return;const i=t+n;if(i<0||i>=s.length)return;const r=[...s],[o]=r.splice(t,1);r.splice(i,0,o),this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:r})}addDraft(e){var t;const n=[...null!==(t=this.drafts[e])&&void 0!==t?t:[],{original_message_id:null,timestamp:(new Date).toISOString(),sender:"assistant",text:"",dataText:"{}"}];this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:n})}removeDraft(e,t){const n=this.drafts[e];if(!n)return;const s=n.filter((e,n)=>n!==t);this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:s})}async handleSave(e){var t,n;const s=null!==(t=this.drafts[e])&&void 0!==t?t:[],i=[];for(let t=0;t<s.length;t+=1){const r=s[t];try{const e=JSON.parse(r.dataText||"{}");i.push({original_message_id:null!==(n=r.original_message_id)&&void 0!==n?n:null,position:t,timestamp:r.timestamp,sender:r.sender,text:r.text,data:e})}catch(n){return void(this.errors=Object.assign(Object.assign({},this.errors),{[e]:`Invalid JSON in message ${t+1}.`}))}}if(this.errors=Object.assign(Object.assign({},this.errors),{[e]:void 0}),!this.onSaveCorrected)return;this.saving=Object.assign(Object.assign({},this.saving),{[e]:!0});const{conversationId:r,pipelineRunId:o}=(e=>{const[t,n]=e.split("::");return{conversationId:t,pipelineRunId:n}})(e);try{await this.onSaveCorrected(r,o,i),this.showToast("Corrected conversation saved.","success"),this.markCorrectedAndAdvance(e)}catch(t){this.errors=Object.assign(Object.assign({},this.errors),{[e]:"Failed to save corrected conversation."}),this.showToast("Failed to save corrected conversation.","error")}finally{this.saving=Object.assign(Object.assign({},this.saving),{[e]:!1})}}toggleExpanded(e){this.expanded=Object.assign(Object.assign({},this.expanded),{[e]:!this.expanded[e]})}getFirstUserSnippet(e){var t;const n=e.find(e=>"user"===e.sender);if(!n)return"No user messages yet.";const s=null!==(t=n.text)&&void 0!==t?t:"";return s.length<=100?s:`${s.slice(0,100)}…`}openDialog(e,t,n){var s,i;const r=null===(s=this.drafts[e])||void 0===s?void 0:s[t];if(!r)return;const o="data"===n?this.prettyJson(r.dataText||"{}"):null!==(i=r.text)&&void 0!==i?i:"";this.dialogchatId=e,this.dialogIndex=t,this.dialogField=n,this.dialogValue=o,this.dialogOpen=!0}closeDialog(){this.dialogOpen=!1,this.dialogchatId=null,this.dialogIndex=null,this.dialogField=null,this.dialogValue=""}prettyJson(e){try{const t=JSON.parse(e);return JSON.stringify(t,null,2)}catch(t){return e}}saveDialog(){if(null===this.dialogchatId||null===this.dialogIndex||null===this.dialogField)return void this.closeDialog();const e="data"===this.dialogField?this.prettyJson(this.dialogValue):this.dialogValue;"data"===this.dialogField?this.updateDraft(this.dialogchatId,this.dialogIndex,{dataText:e}):this.updateDraft(this.dialogchatId,this.dialogIndex,{text:e}),this.closeDialog()}toggleConversation(e){this.conversationExpanded=Object.assign(Object.assign({},this.conversationExpanded),{[e]:!this.conversationExpanded[e]})}render(){return this.chats.length?B`
+    `,e([de({type:String})],In.prototype,"content",void 0),In=e([ce("intentsity-markdown")],In);let zn=class extends ae{constructor(){super(...arguments),this.chats=[],this.drafts={},this.errors={},this.saving={},this.expanded={},this.conversationExpanded={},this.correctedOverrides={},this.toastMessage=null,this.toastKind="success",this.dialogOpen=!1,this.dialogchatId=null,this.dialogIndex=null,this.dialogField=null,this.dialogValue=""}willUpdate(e){if(!e.has("chats"))return;const t=Object.assign({},this.drafts),n=Object.assign({},this.expanded),s=Object.assign({},this.conversationExpanded),i=new Set;this.chats.forEach((e,s)=>{var r,o;const a=On(e);if(i.add(a),t[a])return;const l=(null===(o=null===(r=e.corrected)||void 0===r?void 0:r.messages)||void 0===o?void 0:o.length)?e.corrected.messages:e.messages.map((e,t)=>{var n;return{id:void 0,corrected_chat_id:void 0,original_message_id:e.id,position:t,timestamp:e.timestamp,sender:e.sender,text:e.text,data:null!==(n=e.data)&&void 0!==n?n:{}}});t[a]=l.map(e=>{var t,n;return{original_message_id:null!==(t=e.original_message_id)&&void 0!==t?t:null,timestamp:e.timestamp,sender:e.sender,text:e.text,dataText:(n=e.data,JSON.stringify(null!=n?n:{},null,2))}}),void 0===n[a]&&(n[a]=0===s)});const r=new Set;Rn(this.chats).forEach((e,t)=>{r.add(e.conversation_id),void 0===s[e.conversation_id]&&(s[e.conversation_id]=0===t)}),Object.keys(t).forEach(e=>{i.has(e)||delete t[e]}),Object.keys(n).forEach(e=>{i.has(e)||delete n[e]}),Object.keys(s).forEach(e=>{r.has(e)||delete s[e]}),this.drafts=t,this.expanded=n,this.conversationExpanded=s}getCorrectedAt(e){var t,n;return null!==(t=this.correctedOverrides[On(e)])&&void 0!==t?t:null===(n=e.corrected)||void 0===n?void 0:n.updated_at}showToast(e,t){this.toastMessage=e,this.toastKind=t,window.clearTimeout(this._toastTimer),this._toastTimer=window.setTimeout(()=>{this.toastMessage=null},3e3)}focusChat(e){const t=this.renderRoot.querySelector(`ha-card[data-chat-id="${e}"]`);if(!t)return;t.scrollIntoView({behavior:"smooth",block:"center"});const n=t.querySelector("ha-button");n&&n.focus()}markCorrectedAndAdvance(e){const t=(new Date).toISOString();this.correctedOverrides=Object.assign(Object.assign({},this.correctedOverrides),{[e]:t});const n=this.chats.find(t=>On(t)!==e&&!this.getCorrectedAt(t)),s=n?On(n):void 0;this.expanded=Object.assign(Object.assign(Object.assign({},this.expanded),{[e]:!1}),s?{[s]:!0}:{}),s&&requestAnimationFrame(()=>this.focusChat(s))}updateDraft(e,t,n){const s=this.drafts[e];if(!s)return;const i=[...s];i[t]=Object.assign(Object.assign({},i[t]),n),this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:i})}moveDraft(e,t,n){const s=this.drafts[e];if(!s)return;const i=t+n;if(i<0||i>=s.length)return;const r=[...s],[o]=r.splice(t,1);r.splice(i,0,o),this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:r})}addDraft(e){var t;const n=[...null!==(t=this.drafts[e])&&void 0!==t?t:[],{original_message_id:null,timestamp:(new Date).toISOString(),sender:"assistant",text:"",dataText:"{}"}];this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:n})}removeDraft(e,t){const n=this.drafts[e];if(!n)return;const s=n.filter((e,n)=>n!==t);this.drafts=Object.assign(Object.assign({},this.drafts),{[e]:s})}async handleSave(e){var t,n;const s=null!==(t=this.drafts[e])&&void 0!==t?t:[],i=[];for(let t=0;t<s.length;t+=1){const r=s[t];try{const e=JSON.parse(r.dataText||"{}");i.push({original_message_id:null!==(n=r.original_message_id)&&void 0!==n?n:null,position:t,timestamp:r.timestamp,sender:r.sender,text:r.text,data:e})}catch(n){return void(this.errors=Object.assign(Object.assign({},this.errors),{[e]:`Invalid JSON in message ${t+1}.`}))}}if(this.errors=Object.assign(Object.assign({},this.errors),{[e]:void 0}),!this.onSaveCorrected)return;this.saving=Object.assign(Object.assign({},this.saving),{[e]:!0});const{conversationId:r,pipelineRunId:o}=(e=>{const[t,n]=e.split("::");return{conversationId:t,pipelineRunId:n}})(e);try{await this.onSaveCorrected(r,o,i),this.showToast("Corrected conversation saved.","success"),this.markCorrectedAndAdvance(e)}catch(t){this.errors=Object.assign(Object.assign({},this.errors),{[e]:"Failed to save corrected conversation."}),this.showToast("Failed to save corrected conversation.","error")}finally{this.saving=Object.assign(Object.assign({},this.saving),{[e]:!1})}}toggleExpanded(e){this.expanded=Object.assign(Object.assign({},this.expanded),{[e]:!this.expanded[e]})}getFirstUserSnippet(e){var t;const n=e.length,s=e.find(e=>"user"===e.sender);if(!s)return`${n} message${1===n?"":"s"}`;const i=null!==(t=s.text)&&void 0!==t?t:"";return i.length<=100?i:`${i.slice(0,100)}…`}openDialog(e,t,n){var s,i;const r=null===(s=this.drafts[e])||void 0===s?void 0:s[t];if(!r)return;const o="data"===n?this.prettyJson(r.dataText||"{}"):null!==(i=r.text)&&void 0!==i?i:"";this.dialogchatId=e,this.dialogIndex=t,this.dialogField=n,this.dialogValue=o,this.dialogOpen=!0}closeDialog(){this.dialogOpen=!1,this.dialogchatId=null,this.dialogIndex=null,this.dialogField=null,this.dialogValue=""}prettyJson(e){try{const t=JSON.parse(e);return JSON.stringify(t,null,2)}catch(t){return e}}saveDialog(){if(null===this.dialogchatId||null===this.dialogIndex||null===this.dialogField)return void this.closeDialog();const e="data"===this.dialogField?this.prettyJson(this.dialogValue):this.dialogValue;"data"===this.dialogField?this.updateDraft(this.dialogchatId,this.dialogIndex,{dataText:e}):this.updateDraft(this.dialogchatId,this.dialogIndex,{text:e}),this.closeDialog()}toggleConversation(e){this.conversationExpanded=Object.assign(Object.assign({},this.conversationExpanded),{[e]:!this.conversationExpanded[e]})}render(){return this.chats.length?B`
             <div class="chat-grid">
                 ${Rn(this.chats).map(e=>B`
-                    <section class="conversation-group">
-                        <div class="conversation-header">
-                            <div class="header-row">
-                                <ha-button
-                                    @click=${()=>this.toggleConversation(e.conversation_id)}
-                                    aria-labelledby=${`conversation-heading-${e.conversation_id}`}
-                                >
-                                    <ha-icon
-                                        icon=${this.conversationExpanded[e.conversation_id]?"mdi:chevron-up":"mdi:chevron-down"}
-                                    ></ha-icon>
-                                    ${this.conversationExpanded[e.conversation_id]?"Collapse":"Expand"}
-                                </ha-button>
-                                <h3 id=${`conversation-heading-${e.conversation_id}`}>Conversation ${e.conversation_id}</h3>
+                    <ha-card>
+                        <section class="conversation-group">
+                            <div class="conversation-header">
+                                <div class="header-row">
+                                    <ha-button
+                                        @click=${()=>this.toggleConversation(e.conversation_id)}
+                                        aria-labelledby=${`conversation-heading-${e.conversation_id}`}
+                                    >
+                                        <ha-icon
+                                            icon=${this.conversationExpanded[e.conversation_id]?"mdi:chevron-up":"mdi:chevron-down"}
+                                        ></ha-icon>
+                                        ${this.conversationExpanded[e.conversation_id]?"Collapse":"Expand"}
+                                    </ha-button>
+                                    <h3 id=${`conversation-heading-${e.conversation_id}`}>Conversation ${e.conversation_id}</h3>
+                                </div>
+                                <span class="conversation-meta">
+                                    ${e.runs.length} run${1===e.runs.length?"":"s"}
+                                </span>
                             </div>
-                            <span class="conversation-meta">
-                                ${e.runs.length} run${1===e.runs.length?"":"s"}
-                            </span>
-                        </div>
-                        ${this.conversationExpanded[e.conversation_id]?e.runs.map(e=>{var t,n;const s=On(e),i=null!==(t=this.expanded[s])&&void 0!==t&&t,r=[...e.messages].sort((e,t)=>{var n,s;const i=Cn(e.timestamp)-Cn(t.timestamp);return 0!==i?i:(null!==(n=e.id)&&void 0!==n?n:0)-(null!==(s=t.id)&&void 0!==s?s:0)}),o=this.getFirstUserSnippet(r),a=this.getCorrectedAt(e),l=Boolean(a);return B`
-                                <ha-card class=${l?"corrected-card":""} data-chat-id=${s}>
+                            ${this.conversationExpanded[e.conversation_id]?e.runs.map(e=>{var t,n;const s=On(e),i=null!==(t=this.expanded[s])&&void 0!==t&&t,r=[...e.messages].sort((e,t)=>{var n,s;const i=Cn(e.timestamp)-Cn(t.timestamp);return 0!==i?i:(null!==(n=e.id)&&void 0!==n?n:0)-(null!==(s=t.id)&&void 0!==s?s:0)}),o=this.getFirstUserSnippet(r),a=this.getCorrectedAt(e),l=Boolean(a);return B`
+                                <ha-card class="pipeline-run-card ${l?"corrected-card":""}" data-chat-id=${s}>
                                     <div class="card-content">
                                         <div class="chat-header">
                                             <div class="header-row">
@@ -243,7 +244,8 @@ function e(e,t,n,s){var i,r=arguments.length,o=r<3?t:null===s?s=Object.getOwnPro
                                     </div>
                                 </ha-card>
                             `}):W}
-                    </section>
+                        </section>
+                    </ha-card>
                 `)}
             </div>
             ${this.toastMessage?B`
@@ -278,6 +280,11 @@ function e(e,t,n,s){var i,r=arguments.length,o=r<3?t:null===s?s=Object.getOwnPro
             }
             ha-card {
                 margin-bottom: 16px;
+            }
+            .pipeline-run-card {
+                margin-left: 0;
+                margin-right: 0;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
             }
             .chat-header {
                 display: flex;
@@ -423,13 +430,15 @@ function e(e,t,n,s){var i,r=arguments.length,o=r<3?t:null===s?s=Object.getOwnPro
                 display: flex;
                 flex-direction: column;
                 gap: 16px;
+                padding: 16px;
             }
             .conversation-header {
                 display: flex;
                 justify-content: space-between;
                 align-items: baseline;
                 gap: 12px;
-                padding: 4px 4px 0;
+                padding: 0 0 16px;
+                border-bottom: 1px solid var(--divider-color);
             }
             .conversation-header h3 {
                 margin: 0;
