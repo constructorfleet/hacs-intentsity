@@ -34,31 +34,17 @@ jobs:
         run: uv sync --locked --all-extras --dev
       - name: Ruff
         run: uv run ruff check .
-      - name: Pytest
-        run: uv run pytest --cov=custom_components/intentsity --cov=tests --cov-report=term --cov-report=xml --cov-fail-under=80
-      - name: Extract coverage
-        id: coverage
+      - name: Pytest + coverage
         run: |
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-          from pathlib import Path
-          root = ET.fromstring(Path("coverage.xml").read_text())
-          rate = float(root.attrib.get("line-rate", "0"))
-          percent = round(rate * 100, 2)
-          with open("coverage.txt", "w", encoding="utf-8") as handle:
-              handle.write(str(percent))
-          print(f"coverage={percent}")
-          PY
-          echo "coverage=$(cat coverage.txt)" >> "$GITHUB_OUTPUT"
-      - name: Comment coverage on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
+          uv run pytest \
+            --junitxml=pytest.xml \
+            --cov=hacs-intentsity \
+            --cov-report=term-missing:skip-covered \
+            --cov-report=xml:coverage.xml \
+            | tee pytest-coverage.txt
+      - name: Coverage comment
+        uses: MishaKav/pytest-coverage-comment@main
         with:
-          script: |
-            const coverage = "${{ steps.coverage.outputs.coverage }}";
-            const body = `Coverage: **${coverage}%** (minimum 80%)`;
-            await github.rest.issues.createComment({
-              ...context.repo,
-              issue_number: context.payload.pull_request.number,
-              body,
-            });
+          pytest-coverage-path: pytest-coverage.txt
+          junitxml-path: pytest.xml
+          hide-comment: false
