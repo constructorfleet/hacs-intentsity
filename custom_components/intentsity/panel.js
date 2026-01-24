@@ -104,13 +104,16 @@ function e(e,t,n,s){var i,r=arguments.length,o=r<3?t:null===s?s=Object.getOwnPro
                     <section class="conversation-group">
                         <div class="conversation-header">
                             <div class="header-row">
-                                <ha-button @click=${()=>this.toggleConversation(e.conversation_id)}>
+                                <ha-button
+                                    @click=${()=>this.toggleConversation(e.conversation_id)}
+                                    aria-labelledby=${`conversation-heading-${e.conversation_id}`}
+                                >
                                     <ha-icon
                                         icon=${this.conversationExpanded[e.conversation_id]?"mdi:chevron-up":"mdi:chevron-down"}
                                     ></ha-icon>
                                     ${this.conversationExpanded[e.conversation_id]?"Collapse":"Expand"}
                                 </ha-button>
-                                <h3>Conversation ${e.conversation_id}</h3>
+                                <h3 id=${`conversation-heading-${e.conversation_id}`}>Conversation ${e.conversation_id}</h3>
                             </div>
                             <span class="conversation-meta">
                                 ${e.runs.length} run${1===e.runs.length?"":"s"}
