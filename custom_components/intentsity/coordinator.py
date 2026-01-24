@@ -20,6 +20,7 @@ from homeassistant.components.conversation.chat_log import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+import orjson
 
 
 from . import db
@@ -103,7 +104,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 chat_id=chat.conversation_id,
                 timestamp=parse_timestamp(event.timestamp),
                 sender=data.get("role", "tool_result"),
-                text=text or "",
+                text="",
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
