@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 import functools
 import logging
-from typing import Any
+from typing import Any, cast
 
 from homeassistant.components.assist_pipeline.pipeline import (
     KEY_ASSIST_PIPELINE,
@@ -53,7 +53,7 @@ def _process_intent_start(event: PipelineEvent, chat: Chat) -> Chat | None:
             chat_id=chat.conversation_id,
             sender="assistant",
             text=data.pop("intent_input", ""),
-            data=data,
+            data=asdict(data) if is_dataclass(data) else data,
         )
     )
     return chat
@@ -72,7 +72,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 chat_id=chat.conversation_id,
                 sender=data.get("role", "tool_calls"),
                 text="",
-                data=data,
+                data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
     elif "tool_result" in data:
@@ -90,7 +90,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 chat_id=chat.conversation_id,
                 sender=data.get("role", "tool_result"),
                 text=text or "",
-                data=data,
+                data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
     elif "content" in data:
@@ -110,7 +110,7 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
             )
         chat_message = chat.messages[-1]
         chat_message.text += content
-        chat_message.data.update(data)
+        chat_message.data.update(asdict(data) if is_dataclass(data) else data)  # type: ignore
     return chat
 
 
