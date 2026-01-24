@@ -964,7 +964,7 @@ wheels = [
 
 [[package]]
 name = "hacs-intentsity"
-version = "0.5.2"
+version = "0.5.4"
 source = { virtual = "." }
 dependencies = [
     { name = "homeassistant" },
