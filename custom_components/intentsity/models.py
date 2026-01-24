@@ -6,6 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 

@@ -13,9 +13,6 @@ wheels/
 .idea/
 .vscode/
 
-# uv / virtualenv
-uv.lock
-
 # Virtual environments
 .venv
 

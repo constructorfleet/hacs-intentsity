@@ -461,6 +461,19 @@ class IntentsityDBClient:
             return None
         return _row_to_chat(row)
 
+    def count_uncorrected_chats(self) -> int:
+        engine = self._get_engine()
+        with Session(engine) as session:
+            stmt = (
+                select(func.count(ChatRow.conversation_id))
+                .outerjoin(
+                    CorrectedChatRow,
+                    CorrectedChatRow.original_conversation_id == ChatRow.conversation_id,
+                )
+                .where(CorrectedChatRow.conversation_id.is_(None))
+            )
+            return int(session.scalar(stmt) or 0)
+
     def delete_chat(self, conversation_id: str) -> None:
         engine = self._get_engine()
         with Session(engine) as session:
@@ -563,6 +576,10 @@ def upsert_corrected_chat(
     hass: HomeAssistant, original_conversation_id: str, messages: list[CorrectedChatMessage]
 ) -> str:
     return _get_client(hass).upsert_corrected_chat(original_conversation_id, messages)
+
+
+def count_uncorrected_chats(hass: HomeAssistant) -> int:
+    return _get_client(hass).count_uncorrected_chats()
 
 
 def delete_chat(hass: HomeAssistant, conversation_id: str) -> None:
