@@ -310,6 +310,7 @@ class IntentsityChatList extends LitElement {
     @state() private errors: Record<string, string | undefined> = {};
     @state() private saving: Record<string, boolean> = {};
     @state() private expanded: Record<string, boolean> = {};
+    @state() private conversationExpanded: Record<string, boolean> = {};
     @state() private correctedOverrides: Record<string, string> = {};
     @state() private toastMessage: string | null = null;
     @state() private toastKind: "success" | "error" = "success";
@@ -513,6 +514,9 @@ class IntentsityChatList extends LitElement {
         }
         const updatedDrafts: Record<string, DraftMessage[]> = { ...this.drafts };
         const updatedExpanded: Record<string, boolean> = { ...this.expanded };
+        const updatedConversationExpanded: Record<string, boolean> = {
+            ...this.conversationExpanded,
+        };
         const chatIds = new Set<string>();
         this.chats.forEach((chat, index) => {
             const chatKey = getChatKey(chat);
@@ -546,6 +550,14 @@ class IntentsityChatList extends LitElement {
             }
         });
 
+        const conversationIds = new Set<string>();
+        groupChatsByConversation(this.chats).forEach((group, index) => {
+            conversationIds.add(group.conversation_id);
+            if (updatedConversationExpanded[group.conversation_id] === undefined) {
+                updatedConversationExpanded[group.conversation_id] = index === 0;
+            }
+        });
+
         Object.keys(updatedDrafts).forEach((key) => {
             if (!chatIds.has(key)) {
                 delete updatedDrafts[key];
@@ -556,8 +568,14 @@ class IntentsityChatList extends LitElement {
                 delete updatedExpanded[key];
             }
         });
+        Object.keys(updatedConversationExpanded).forEach((key) => {
+            if (!conversationIds.has(key)) {
+                delete updatedConversationExpanded[key];
+            }
+        });
         this.drafts = updatedDrafts;
         this.expanded = updatedExpanded;
+        this.conversationExpanded = updatedConversationExpanded;
     }
 
     private getCorrectedAt(chat: Chat): string | undefined {
@@ -699,8 +717,8 @@ class IntentsityChatList extends LitElement {
         this.expanded = { ...this.expanded, [chatId]: !this.expanded[chatId] };
     }
 
-    private getFirstUserSnippet(chat: Chat): string {
-        const message = chat.messages.find((msg) => msg.sender === "user");
+    private getFirstUserSnippet(messages: ChatMessage[]): string {
+        const message = messages.find((msg) => msg.sender === "user");
         if (!message) {
             return "No user messages yet.";
         }
@@ -763,6 +781,13 @@ class IntentsityChatList extends LitElement {
         this.closeDialog();
     }
 
+    private toggleConversation(conversationId: string): void {
+        this.conversationExpanded = {
+            ...this.conversationExpanded,
+            [conversationId]: !this.conversationExpanded[conversationId],
+        };
+    }
+
     render() {
         if (!this.chats.length) {
             return html`
@@ -777,17 +802,22 @@ class IntentsityChatList extends LitElement {
                 ${groupChatsByConversation(this.chats).map((group) => html`
                     <section class="conversation-group">
                         <div class="conversation-header">
-                            <h3>Conversation ${group.conversation_id}</h3>
+                            <div class="header-row">
+                                <ha-button @click=${() => this.toggleConversation(group.conversation_id)}>
+                                    <ha-icon
+                                        icon=${this.conversationExpanded[group.conversation_id] ? "mdi:chevron-up" : "mdi:chevron-down"}
+                                    ></ha-icon>
+                                    ${this.conversationExpanded[group.conversation_id] ? "Collapse" : "Expand"}
+                                </ha-button>
+                                <h3>Conversation ${group.conversation_id}</h3>
+                            </div>
                             <span class="conversation-meta">
                                 ${group.runs.length} run${group.runs.length === 1 ? "" : "s"}
                             </span>
                         </div>
-                        ${group.runs.map((chat) => {
+                        ${this.conversationExpanded[group.conversation_id] ? group.runs.map((chat) => {
                             const chatId = getChatKey(chat);
                             const isExpanded = this.expanded[chatId] ?? false;
-                            const preview = this.getFirstUserSnippet(chat);
-                            const correctedAt = this.getCorrectedAt(chat);
-                            const isCorrected = Boolean(correctedAt);
                             const orderedMessages = [...chat.messages].sort((a, b) => {
                                 const diff = toEpoch(a.timestamp) - toEpoch(b.timestamp);
                                 if (diff !== 0) {
@@ -795,6 +825,9 @@ class IntentsityChatList extends LitElement {
                                 }
                                 return (a.id ?? 0) - (b.id ?? 0);
                             });
+                            const preview = this.getFirstUserSnippet(orderedMessages);
+                            const correctedAt = this.getCorrectedAt(chat);
+                            const isCorrected = Boolean(correctedAt);
                             return html`
                                 <ha-card class=${isCorrected ? "corrected-card" : ""} data-chat-id=${chatId}>
                                     <div class="card-content">
@@ -940,7 +973,7 @@ class IntentsityChatList extends LitElement {
                                     </div>
                                 </ha-card>
                             `;
-                        })}
+                        }) : nothing}
                     </section>
                 `)}
             </div>
