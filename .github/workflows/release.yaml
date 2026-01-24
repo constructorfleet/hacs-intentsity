@@ -41,6 +41,8 @@ jobs:
         run: |
           VERSION=$(cat version.txt)
           TAG="v${VERSION}"
+          git config --global user.email "github-bot@github.com"
+          git config --global user.name "github-bot"
           if git rev-parse "${TAG}" >/dev/null 2>&1; then
             echo "Tag ${TAG} already exists"
             exit 0
