@@ -4,7 +4,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 import functools
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.assist_pipeline.pipeline import (
     KEY_ASSIST_PIPELINE,
