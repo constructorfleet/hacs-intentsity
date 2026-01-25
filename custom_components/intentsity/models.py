@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 
@@ -55,6 +55,28 @@ class ChatListResponse(BaseModel):
     chats: list[Chat]
 
 
+class ChatListRequest(BaseModel):
+    limit: int
+    corrected: str = "all"
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @field_validator("corrected")
+    @classmethod
+    def _validate_corrected(cls, value: str) -> str:
+        allowed = {"all", "corrected", "uncorrected"}
+        if value not in allowed:
+            raise ValueError("corrected must be one of: all, corrected, uncorrected")
+        return value
+
+    @field_validator("start", "end", mode="before")
+    @classmethod
+    def _empty_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+
 class CorrectedChatSaveRequest(BaseModel):
     conversation_id: str
     pipeline_run_id: str
@@ -66,4 +88,5 @@ CorrectedChatMessage.model_rebuild()
 CorrectedChat.model_rebuild()
 Chat.model_rebuild()
 ChatListResponse.model_rebuild()
+ChatListRequest.model_rebuild()
 CorrectedChatSaveRequest.model_rebuild()

@@ -665,18 +665,38 @@ class IntentsityDBClient:
             session.commit()
             return corrected.conversation_id
 
-    def fetch_recent_chats(self, limit: int | None = None) -> list[Chat]:
+    def fetch_recent_chats(
+        self,
+        limit: int | None = None,
+        corrected: bool | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[Chat]:
         engine = self._get_engine()
         with Session(engine) as session:
-            stmt = (
-                select(ChatRow)
-                .order_by(ChatRow.created_at.desc())
-                .options(
-                    selectinload(ChatRow.messages),
-                    selectinload(ChatRow.corrected).selectinload(
-                        CorrectedChatRow.messages
-                    ),
+            run_timestamp = func.coalesce(ChatRow.run_timestamp, ChatRow.created_at)
+            stmt = select(ChatRow).order_by(ChatRow.created_at.desc())
+            if corrected is True:
+                stmt = stmt.join(
+                    CorrectedChatRow,
+                    (CorrectedChatRow.original_conversation_id == ChatRow.conversation_id)
+                    & (CorrectedChatRow.original_pipeline_run_id == ChatRow.pipeline_run_id),
                 )
+            elif corrected is False:
+                stmt = stmt.outerjoin(
+                    CorrectedChatRow,
+                    (CorrectedChatRow.original_conversation_id == ChatRow.conversation_id)
+                    & (CorrectedChatRow.original_pipeline_run_id == ChatRow.pipeline_run_id),
+                ).where(CorrectedChatRow.conversation_id.is_(None))
+            if start is not None:
+                stmt = stmt.where(run_timestamp >= start)
+            if end is not None:
+                stmt = stmt.where(run_timestamp <= end)
+            stmt = stmt.options(
+                selectinload(ChatRow.messages),
+                selectinload(ChatRow.corrected).selectinload(
+                    CorrectedChatRow.messages
+                ),
             )
             if limit:
                 stmt = stmt.limit(limit)
@@ -823,8 +843,14 @@ def replace_chat_messages(
     )
 
 
-def fetch_recent_chats(hass: HomeAssistant, limit: int | None = None) -> list[Chat]:
-    return _get_client(hass).fetch_recent_chats(limit)
+def fetch_recent_chats(
+    hass: HomeAssistant,
+    limit: int | None = None,
+    corrected: bool | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[Chat]:
+    return _get_client(hass).fetch_recent_chats(limit, corrected, start, end)
 
 
 def fetch_latest_chat_by_conversation_id(

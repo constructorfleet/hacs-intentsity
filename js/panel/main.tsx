@@ -1100,6 +1100,9 @@ class IntentsityChatList extends LitElement {
 class IntentsityPanel extends LitElement {
     @state() private chats: Chat[] = [];
     @state() private limit = DEFAULT_LIMIT;
+    @state() private correctedFilter: "all" | "corrected" | "uncorrected" = "all";
+    @state() private startFilter = "";
+    @state() private endFilter = "";
 
     private unsubscribe?: HassSubscription;
     private connectionPromise?: Promise<HassConnection>;
@@ -1123,6 +1126,17 @@ class IntentsityPanel extends LitElement {
                 align-items: center;
                 gap: 12px;
                 margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .control-group {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }
+            .control-spacer {
+                flex: 1;
+                min-width: 12px;
             }
         `
     ];
@@ -1157,11 +1171,17 @@ class IntentsityPanel extends LitElement {
     private async loadChats(): Promise<void> {
         const conn = await this.getConnection();
         this.teardownSubscription();
+
+        const start = this.toApiFilter(this.startFilter);
+        const end = this.toApiFilter(this.endFilter);
         
         // Initial snapshot
         const response = await conn.sendMessagePromise<{ chats?: Chat[]; }>(({
             type: LIST_COMMAND,
             limit: this.limit,
+            corrected: this.correctedFilter,
+            start,
+            end,
         } as any));
         this.chats = response.chats ?? [];
 
@@ -1169,6 +1189,9 @@ class IntentsityPanel extends LitElement {
         this.unsubscribe = await conn.subscribeMessage(this.subscriptionHandler, (({ 
             type: SUBSCRIBE_COMMAND,
             limit: this.limit,
+            corrected: this.correctedFilter,
+            start,
+            end,
         } as any) as any));
     }
 
@@ -1201,6 +1224,37 @@ class IntentsityPanel extends LitElement {
         void this.loadChats();
     }
 
+    private handleCorrectedFilter(event: Event) {
+        const detail = (event as CustomEvent).detail as { value?: string } | undefined;
+        const input = event.currentTarget as HTMLInputElement | null;
+        const value = (detail?.value ?? input?.value ?? "all") as "all" | "corrected" | "uncorrected";
+        this.correctedFilter = value;
+        void this.loadChats();
+    }
+
+    private handleStartFilter(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        this.startFilter = input.value;
+        void this.loadChats();
+    }
+
+    private handleEndFilter(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        this.endFilter = input.value;
+        void this.loadChats();
+    }
+
+    private toApiFilter(value: string): string | undefined {
+        if (!value) {
+            return undefined;
+        }
+        const timestamp = new Date(value);
+        if (Number.isNaN(timestamp.getTime())) {
+            return undefined;
+        }
+        return timestamp.toISOString();
+    }
+
     render() {
         return html`
             <ha-card>
@@ -1209,12 +1263,36 @@ class IntentsityPanel extends LitElement {
                     <p>Observational log of all Home Assistant Assist conversations.</p>
 
                     <div class="controls">
-                        <ha-textfield
-                            label="Show last"
-                            type="number"
-                            .value=${String(this.limit)}
-                            @change=${this.handleLimitChange}
-                        ></ha-textfield>
+                        <div class="control-group">
+                            <ha-textfield
+                                label="Show last"
+                                type="number"
+                                .value=${String(this.limit)}
+                                @change=${this.handleLimitChange}
+                            ></ha-textfield>
+                            <ha-textfield
+                                label="Start"
+                                type="datetime-local"
+                                .value=${this.startFilter}
+                                @change=${this.handleStartFilter}
+                            ></ha-textfield>
+                            <ha-textfield
+                                label="End"
+                                type="datetime-local"
+                                .value=${this.endFilter}
+                                @change=${this.handleEndFilter}
+                            ></ha-textfield>
+                            <ha-select
+                                label="Status"
+                                .value=${this.correctedFilter}
+                                @selected=${this.handleCorrectedFilter}
+                            >
+                                <mwc-list-item value="all">All</mwc-list-item>
+                                <mwc-list-item value="corrected">Corrected</mwc-list-item>
+                                <mwc-list-item value="uncorrected">Uncorrected</mwc-list-item>
+                            </ha-select>
+                        </div>
+                        <span class="control-spacer"></span>
                         <ha-button @click=${() => void this.loadChats()}>
                             <ha-icon icon="mdi:refresh"></ha-icon>
                             Refresh

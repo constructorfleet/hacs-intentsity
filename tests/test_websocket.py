@@ -39,16 +39,31 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
         messages=[ChatMessage(timestamp=now, sender="user", text="Hi")],
     )
 
-    def _fetch_recent_chats(_hass, _limit):
+    called: dict[str, object] = {}
+
+    def _fetch_recent_chats(_hass, limit, corrected, start, end):
+        called["limit"] = limit
+        called["corrected"] = corrected
+        called["start"] = start
+        called["end"] = end
         return ChatListResponse(chats=[chat])
 
     monkeypatch.setattr(websocket, "fetch_recent_chats", _fetch_recent_chats)
 
     conn = _Connection()
+    start = "2026-01-01T12:00:00+00:00"
+    end = "2026-01-31T12:00:00+00:00"
     websocket.websocket_list_chats(
         hass,
         conn,
-        {"id": 1, "type": WS_CMD_LIST_CHATS, "limit": DEFAULT_EVENT_LIMIT},
+        {
+            "id": 1,
+            "type": WS_CMD_LIST_CHATS,
+            "limit": DEFAULT_EVENT_LIMIT,
+            "corrected": "uncorrected",
+            "start": start,
+            "end": end,
+        },
     )
     await hass.async_block_till_done()
 
@@ -58,20 +73,39 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
     assert payload["chats"][0]["conversation_id"] == "conv-1"
     assert payload["chats"][0]["pipeline_run_id"] == "run-1"
     assert parse_timestamp(payload["chats"][0]["run_timestamp"]) == now
+    assert called["limit"] == DEFAULT_EVENT_LIMIT
+    assert called["corrected"] is False
+    assert called["start"] == parse_timestamp(start)
+    assert called["end"] == parse_timestamp(end)
 
 
 @pytest.mark.asyncio
 async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
-    def _fetch_recent_chats(_hass, _limit):
+    called: dict[str, object] = {}
+
+    def _fetch_recent_chats(_hass, limit, corrected, start, end):
+        called["limit"] = limit
+        called["corrected"] = corrected
+        called["start"] = start
+        called["end"] = end
         return []
 
     monkeypatch.setattr(websocket, "fetch_recent_chats", _fetch_recent_chats)
 
     conn = _Connection()
+    start = "2026-01-01T12:00:00+00:00"
+    end = "2026-01-31T12:00:00+00:00"
     websocket.websocket_subscribe_chats(
         hass,
         conn,
-        {"id": 2, "type": WS_CMD_SUBSCRIBE_CHATS, "limit": DEFAULT_EVENT_LIMIT},
+        {
+            "id": 2,
+            "type": WS_CMD_SUBSCRIBE_CHATS,
+            "limit": DEFAULT_EVENT_LIMIT,
+            "corrected": "corrected",
+            "start": start,
+            "end": end,
+        },
     )
     await hass.async_block_till_done()
 
@@ -79,6 +113,10 @@ async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
     assert 2 in conn.subscriptions
     assert conn.messages
     assert conn.messages[0]["type"] == "event"
+    assert called["limit"] == DEFAULT_EVENT_LIMIT
+    assert called["corrected"] is True
+    assert called["start"] == parse_timestamp(start)
+    assert called["end"] == parse_timestamp(end)
 
     for unsubscribe in list(conn.subscriptions.values()):
         unsubscribe()
