@@ -325,6 +325,7 @@ class IntentsityChatList extends LitElement {
     @state() private expanded: Record<string, boolean> = {};
     @state() private conversationExpanded: Record<string, boolean> = {};
     @state() private correctedOverrides: Record<string, string> = {};
+    @state() private clipboard: DraftMessage | null = null;
     @state() private toastMessage: string | null = null;
     @state() private toastKind: "success" | "error" = "success";
     @state() private dialogOpen = false;
@@ -690,6 +691,36 @@ class IntentsityChatList extends LitElement {
         this.drafts = { ...this.drafts, [chatId]: next };
     }
 
+    private cloneDraftWithTimestamp(draft: DraftMessage): DraftMessage {
+        return {
+            original_message_id: null,
+            timestamp: new Date().toISOString(),
+            sender: draft.sender,
+            text: draft.text,
+            dataText: draft.dataText,
+        };
+    }
+
+    private copyDraft(chatId: string, index: number): void {
+        const draft = this.drafts[chatId]?.[index];
+        if (!draft) {
+            return;
+        }
+        this.clipboard = this.cloneDraftWithTimestamp(draft);
+        this.showToast("Message copied.", "success");
+    }
+
+    private insertClipboard(chatId: string, index: number): void {
+        if (!this.clipboard) {
+            return;
+        }
+        const existing = this.drafts[chatId] ?? [];
+        const clamped = Math.max(0, Math.min(index, existing.length));
+        const next = [...existing];
+        next.splice(clamped, 0, this.cloneDraftWithTimestamp(this.clipboard));
+        this.drafts = { ...this.drafts, [chatId]: next };
+    }
+
     private removeDraft(chatId: string, index: number): void {
         const existing = this.drafts[chatId];
         if (!existing) {
@@ -916,6 +947,10 @@ class IntentsityChatList extends LitElement {
                                                                       <ha-icon icon="mdi:plus-box"></ha-icon>
                                                                       Insert above
                                                                   </ha-button>
+                                                                  <ha-button @click=${() => this.insertClipboard(chatId, index)} ?disabled=${!this.clipboard}>
+                                                                      <ha-icon icon="mdi:content-paste"></ha-icon>
+                                                                      Paste above
+                                                                  </ha-button>
                                                                   <ha-button @click=${() => this.moveDraft(chatId, index, -1)}>
                                                                       <ha-icon icon="mdi:arrow-up"></ha-icon>
                                                                       Up
@@ -927,6 +962,14 @@ class IntentsityChatList extends LitElement {
                                                                   <ha-button @click=${() => this.insertDraft(chatId, index + 1)}>
                                                                       <ha-icon icon="mdi:plus-box-multiple"></ha-icon>
                                                                       Insert below
+                                                                  </ha-button>
+                                                                  <ha-button @click=${() => this.insertClipboard(chatId, index + 1)} ?disabled=${!this.clipboard}>
+                                                                      <ha-icon icon="mdi:content-paste"></ha-icon>
+                                                                      Paste below
+                                                                  </ha-button>
+                                                                  <ha-button @click=${() => this.copyDraft(chatId, index)}>
+                                                                      <ha-icon icon="mdi:content-copy"></ha-icon>
+                                                                      Copy
                                                                   </ha-button>
                                                                   <ha-button @click=${() => this.removeDraft(chatId, index)}>
                                                                       <ha-icon icon="mdi:delete"></ha-icon>
@@ -997,6 +1040,10 @@ class IntentsityChatList extends LitElement {
                                                               <ha-button @click=${() => this.addDraft(chatId)}>
                                                                   <ha-icon icon="mdi:plus-circle"></ha-icon>
                                                                   Add message
+                                                              </ha-button>
+                                                              <ha-button @click=${() => this.insertClipboard(chatId, (this.drafts[chatId] ?? []).length)} ?disabled=${!this.clipboard}>
+                                                                  <ha-icon icon="mdi:content-paste"></ha-icon>
+                                                                  Paste at end
                                                               </ha-button>
                                                           </div>
                                                           <ha-button
