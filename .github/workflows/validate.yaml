@@ -51,3 +51,4 @@ jobs:
           pytest-coverage-path: pytest-coverage.txt
           junitxml-path: pytest.xml
           hide-comment: false
+          github-token: ${{ secrets.GH_TOKEN }}
