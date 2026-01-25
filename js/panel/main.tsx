@@ -89,6 +89,7 @@ const getChatKey = (chat: Chat): string => buildChatKey(chat.conversation_id, ch
 type ConversationGroup = {
     conversation_id: string;
     runs: Chat[];
+    latestTimestamp: number;
 };
 
 const toEpoch = (value: string | undefined): number => {
@@ -106,6 +107,14 @@ const sortRunsAscending = (runs: Chat[]): Chat[] => (
     })
 );
 
+const getChatTimestamp = (chat: Chat): number => {
+    const runTimestamp = toEpoch(chat.run_timestamp);
+    if (runTimestamp) {
+        return runTimestamp;
+    }
+    return toEpoch(chat.created_at);
+};
+
 const groupChatsByConversation = (chats: Chat[]): ConversationGroup[] => {
     const groups = new Map<string, ConversationGroup>();
     const ordered: ConversationGroup[] = [];
@@ -113,16 +122,20 @@ const groupChatsByConversation = (chats: Chat[]): ConversationGroup[] => {
         const key = chat.conversation_id;
         let group = groups.get(key);
         if (!group) {
-            group = { conversation_id: key, runs: [] };
+            group = { conversation_id: key, runs: [], latestTimestamp: 0 };
             groups.set(key, group);
             ordered.push(group);
         }
         group.runs.push(chat);
+        const chatTimestamp = getChatTimestamp(chat);
+        if (chatTimestamp > group.latestTimestamp) {
+            group.latestTimestamp = chatTimestamp;
+        }
     });
     return ordered.map((group) => ({
         ...group,
         runs: sortRunsAscending(group.runs),
-    }));
+    })).sort((a, b) => b.latestTimestamp - a.latestTimestamp);
 };
 
 const formatTimestamp = (value: string): string => new Date(value).toLocaleString();
@@ -837,6 +850,8 @@ class IntentsityChatList extends LitElement {
                                 }
                                 return (a.id ?? 0) - (b.id ?? 0);
                             });
+                            const messageCount = orderedMessages.length;
+                            const messageCountLabel = `${messageCount} message${messageCount === 1 ? "" : "s"}`;
                             const preview = this.getFirstUserSnippet(orderedMessages);
                             const correctedAt = this.getCorrectedAt(chat);
                             const isCorrected = Boolean(correctedAt);
@@ -857,7 +872,7 @@ class IntentsityChatList extends LitElement {
                                                         <ha-icon slot="icon" icon="mdi:timeline"></ha-icon>
                                                     </ha-assist-chip>
                                                     <ha-assist-chip
-                                                        label="Started ${formatTimestamp(chat.run_timestamp)}"
+                                                        label="Started ${formatTimestamp(chat.run_timestamp)} · ${messageCountLabel}"
                                                         hasIcon
                                                     >
                                                         <ha-icon slot="icon" icon="mdi:clock-start"></ha-icon>
