@@ -10,6 +10,7 @@ from custom_components.intentsity.const import (
     WS_CMD_LIST_CHATS,
     WS_CMD_SAVE_CORRECTED_CHAT,
     WS_CMD_SUBSCRIBE_CHATS,
+    WS_CMD_TOMBSTONE,
 )
 from custom_components.intentsity.models import Chat, ChatListResponse, ChatMessage
 from custom_components.intentsity.utils import parse_timestamp
@@ -157,3 +158,35 @@ async def test_websocket_save_corrected_chat(hass, monkeypatch) -> None:
     assert saved["pipeline_run_id"] == "run-save"
     assert len(saved["messages"]) == 1
     assert conn.results == [(3, None)]
+
+
+@pytest.mark.asyncio
+async def test_websocket_tombstone_targets(hass, monkeypatch) -> None:
+    called: dict[str, object] = {}
+
+    def _tombstone_targets(_hass, targets):
+        called["targets"] = targets
+
+    monkeypatch.setattr(websocket, "tombstone_targets", _tombstone_targets)
+
+    conn = _Connection()
+    msg = {
+        "id": 4,
+        "type": WS_CMD_TOMBSTONE,
+        "targets": [
+            {"kind": "chat", "conversation_id": "conv-1", "pipeline_run_id": "run-1"},
+            {"kind": "message", "message_id": 12},
+            {
+                "kind": "corrected_chat",
+                "conversation_id": "conv-2",
+                "pipeline_run_id": "run-2",
+            },
+            {"kind": "corrected_message", "corrected_message_id": 20},
+        ],
+    }
+
+    websocket.websocket_tombstone_targets(hass, conn, msg)
+    await hass.async_block_till_done()
+
+    assert conn.results == [(4, None)]
+    assert called["targets"]

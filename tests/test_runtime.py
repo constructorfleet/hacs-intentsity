@@ -510,6 +510,96 @@ async def test_delete_corrected_chat_cascades_messages(hass: HomeAssistant) -> N
     assert chats[0].corrected is None
 
 
+@pytest.mark.asyncio
+async def test_tombstone_targets(hass: HomeAssistant) -> None:
+    _setup_fresh_db(hass)
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+        TombstoneTarget,
+    )
+
+    timestamp = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    conversation_id, pipeline_run_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=timestamp,
+            conversation_id="conv-tombstone",
+            pipeline_run_id="run-tombstone",
+            run_timestamp=timestamp,
+            messages=[
+                ChatMessage(
+                    timestamp=timestamp,
+                    sender="user",
+                    text="First",
+                ),
+                ChatMessage(
+                    timestamp=timestamp,
+                    sender="assistant",
+                    text="Second",
+                ),
+            ],
+        ),
+    )
+    chat = db.fetch_recent_chats(hass, 1)[0]
+    message_id = chat.messages[0].id
+
+    db.upsert_corrected_chat(
+        hass,
+        conversation_id,
+        pipeline_run_id,
+        [
+            CorrectedChatMessage(
+                original_message_id=message_id,
+                timestamp=timestamp,
+                sender="assistant",
+                text="Corrected",
+            )
+        ],
+    )
+    corrected_chat = db.fetch_recent_chats(hass, 1)[0].corrected
+    corrected_message_id = corrected_chat.messages[0].id
+
+    db.tombstone_targets(
+        hass,
+        [
+            TombstoneTarget(kind="message", message_id=message_id),
+            TombstoneTarget(kind="corrected_message", corrected_message_id=corrected_message_id),
+        ],
+    )
+
+    chat = db.fetch_recent_chats(hass, 1)[0]
+    assert all(msg.id != message_id for msg in chat.messages)
+    assert chat.corrected is not None
+    assert all(msg.id != corrected_message_id for msg in chat.corrected.messages)
+
+    db.tombstone_targets(
+        hass,
+        [
+            TombstoneTarget(
+                kind="corrected_chat",
+                conversation_id=conversation_id,
+                pipeline_run_id=pipeline_run_id,
+            ),
+        ],
+    )
+    chat = db.fetch_recent_chats(hass, 1)[0]
+    assert chat.corrected is None
+
+    db.tombstone_targets(
+        hass,
+        [
+            TombstoneTarget(
+                kind="chat",
+                conversation_id=conversation_id,
+                pipeline_run_id=pipeline_run_id,
+            ),
+        ],
+    )
+    assert db.fetch_recent_chats(hass, 1) == []
+
+
 class _PipelineStoreStub:
     def __init__(self, pipeline: Pipeline) -> None:
         self.data = {pipeline.id: pipeline}

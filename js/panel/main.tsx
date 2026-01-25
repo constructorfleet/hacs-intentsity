@@ -8,6 +8,7 @@ const MAX_LIMIT = 500;
 const LIST_COMMAND = "intentsity/chats/list";
 const SUBSCRIBE_COMMAND = "intentsity/chats/subscribe";
 const SAVE_CORRECTED_COMMAND = "intentsity/chats/corrected/save";
+const TOMBSTONE_COMMAND = "intentsity/chats/tombstone";
 
 type HassSubscription = () => void;
 type HassMessageRequest = Record<string, unknown>;
@@ -63,6 +64,12 @@ interface SubscriptionMessage {
     event?: { chats?: Chat[]; };
     chats?: Chat[];
 }
+
+type TombstoneTarget =
+    | { kind: "chat"; conversation_id: string; pipeline_run_id: string; }
+    | { kind: "message"; message_id: number; }
+    | { kind: "corrected_chat"; conversation_id: string; pipeline_run_id: string; }
+    | { kind: "corrected_message"; corrected_message_id: number; };
 
 declare global {
     interface Window {
@@ -143,6 +150,7 @@ const toJsonText = (value: Record<string, any> | undefined): string =>
     JSON.stringify(value ?? {}, null, 2);
 
 type DraftMessage = {
+    corrected_message_id?: number | null;
     original_message_id?: number | null;
     timestamp: string;
     sender: string;
@@ -319,6 +327,8 @@ class IntentsityChatList extends LitElement {
         pipelineRunId: string,
         messages: CorrectedChatMessage[],
     ) => Promise<void>;
+    @property({ attribute: false })
+    onDeleteTargets?: (targets: TombstoneTarget[]) => Promise<void>;
     @state() private drafts: Record<string, DraftMessage[]> = {};
     @state() private errors: Record<string, string | undefined> = {};
     @state() private saving: Record<string, boolean> = {};
@@ -326,6 +336,8 @@ class IntentsityChatList extends LitElement {
     @state() private conversationExpanded: Record<string, boolean> = {};
     @state() private correctedOverrides: Record<string, string> = {};
     @state() private clipboard: DraftMessage | null = null;
+    @state() private selectionMode = false;
+    @state() private selectedTargets: Record<string, TombstoneTarget> = {};
     @state() private toastMessage: string | null = null;
     @state() private toastKind: "success" | "error" = "success";
     @state() private dialogOpen = false;
@@ -367,6 +379,14 @@ class IntentsityChatList extends LitElement {
             .messages-list {
                 display: flex;
                 flex-direction: column;
+            }
+            .message-row {
+                display: flex;
+                gap: 8px;
+                align-items: flex-start;
+            }
+            .select-checkbox {
+                margin-top: 10px;
             }
             .empty-state {
                 padding: 32px;
@@ -509,6 +529,17 @@ class IntentsityChatList extends LitElement {
                 font-size: 12px;
                 color: var(--secondary-text-color);
             }
+            .selection-bar {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .selection-count {
+                font-size: 12px;
+                color: var(--secondary-text-color);
+            }
             .toast {
                 position: fixed;
                 right: 24px;
@@ -559,6 +590,7 @@ class IntentsityChatList extends LitElement {
                   }));
 
             updatedDrafts[chatKey] = seedMessages.map((msg) => ({
+                corrected_message_id: (msg as CorrectedChatMessage).id ?? null,
                 original_message_id: msg.original_message_id ?? null,
                 timestamp: msg.timestamp,
                 sender: msg.sender,
@@ -597,6 +629,9 @@ class IntentsityChatList extends LitElement {
         this.drafts = updatedDrafts;
         this.expanded = updatedExpanded;
         this.conversationExpanded = updatedConversationExpanded;
+        if (this.selectionMode) {
+            this.selectedTargets = {};
+        }
     }
 
     private getCorrectedAt(chat: Chat): string | undefined {
@@ -610,6 +645,57 @@ class IntentsityChatList extends LitElement {
         (this as any)._toastTimer = window.setTimeout(() => {
             this.toastMessage = null;
         }, 3000);
+    }
+
+    private selectionKey(target: TombstoneTarget): string {
+        if (target.kind === "chat" || target.kind === "corrected_chat") {
+            return `${target.kind}:${target.conversation_id}:${target.pipeline_run_id}`;
+        }
+        if (target.kind === "message") {
+            return `${target.kind}:${target.message_id}`;
+        }
+        return `${target.kind}:${target.corrected_message_id}`;
+    }
+
+    private toggleSelectionMode(): void {
+        const next = !this.selectionMode;
+        this.selectionMode = next;
+        if (!next) {
+            this.selectedTargets = {};
+        }
+    }
+
+    private toggleTarget(target: TombstoneTarget): void {
+        const key = this.selectionKey(target);
+        const next = { ...this.selectedTargets };
+        if (next[key]) {
+            delete next[key];
+        } else {
+            next[key] = target;
+        }
+        this.selectedTargets = next;
+    }
+
+    private isSelected(target: TombstoneTarget): boolean {
+        return Boolean(this.selectedTargets[this.selectionKey(target)]);
+    }
+
+    private async deleteSelected(): Promise<void> {
+        if (!this.onDeleteTargets) {
+            return;
+        }
+        const targets = Object.values(this.selectedTargets);
+        if (!targets.length) {
+            return;
+        }
+        try {
+            await this.onDeleteTargets(targets);
+            this.showToast("Selected items deleted.", "success");
+            this.selectedTargets = {};
+            this.selectionMode = false;
+        } catch (error) {
+            this.showToast("Failed to delete selected items.", "error");
+        }
     }
 
     private focusChat(chatId: string) {
@@ -675,6 +761,7 @@ class IntentsityChatList extends LitElement {
 
     private buildEmptyDraft(): DraftMessage {
         return {
+            corrected_message_id: null,
             original_message_id: null,
             timestamp: new Date().toISOString(),
             sender: "assistant",
@@ -693,6 +780,7 @@ class IntentsityChatList extends LitElement {
 
     private cloneDraftWithTimestamp(draft: DraftMessage): DraftMessage {
         return {
+            corrected_message_id: null,
             original_message_id: null,
             timestamp: new Date().toISOString(),
             sender: draft.sender,
@@ -856,7 +944,24 @@ class IntentsityChatList extends LitElement {
                 </div>
             `;
         }
+        const selectedCount = Object.keys(this.selectedTargets).length;
         return html`
+            <div class="selection-bar">
+                <ha-button @click=${this.toggleSelectionMode}>
+                    <ha-icon icon=${this.selectionMode ? "mdi:close-circle" : "mdi:checkbox-marked-outline"}></ha-icon>
+                    ${this.selectionMode ? "Exit selection" : "Select"}
+                </ha-button>
+                ${this.selectionMode ? html`
+                    <ha-button
+                        @click=${() => void this.deleteSelected()}
+                        ?disabled=${selectedCount === 0}
+                    >
+                        <ha-icon icon="mdi:delete"></ha-icon>
+                        Delete selected
+                    </ha-button>
+                    <span class="selection-count">${selectedCount} selected</span>
+                ` : nothing}
+            </div>
             <div class="chat-grid">
                 ${groupChatsByConversation(this.chats).map((group) => html`
                     <ha-card>
@@ -898,6 +1003,21 @@ class IntentsityChatList extends LitElement {
                                     <div class="card-content">
                                         <div class="chat-header">
                                             <div class="header-row">
+                                                ${this.selectionMode ? html`
+                                                    <ha-checkbox
+                                                        class="select-checkbox"
+                                                        .checked=${this.isSelected({
+                                                            kind: "chat",
+                                                            conversation_id: chat.conversation_id,
+                                                            pipeline_run_id: chat.pipeline_run_id,
+                                                        })}
+                                                        @change=${() => this.toggleTarget({
+                                                            kind: "chat",
+                                                            conversation_id: chat.conversation_id,
+                                                            pipeline_run_id: chat.pipeline_run_id,
+                                                        })}
+                                                    ></ha-checkbox>
+                                                ` : nothing}
                                                 <ha-button @click=${() => this.toggleExpanded(chatId)}>
                                                     <ha-icon icon=${isExpanded ? "mdi:chevron-up" : "mdi:chevron-down"}></ha-icon>
                                                     ${isExpanded ? "Collapse" : "Expand"}
@@ -934,15 +1054,54 @@ class IntentsityChatList extends LitElement {
                                                       <h4>Original</h4>
                                                       <div class="messages-list">
                                                           ${orderedMessages.map((msg) => html`
-                                                              <intentsity-chat-message .message=${msg}></intentsity-chat-message>
+                                                              <div class="message-row">
+                                                                  ${this.selectionMode ? html`
+                                                                      <ha-checkbox
+                                                                          class="select-checkbox"
+                                                                          .checked=${msg.id !== undefined ? this.isSelected({ kind: "message", message_id: msg.id }) : false}
+                                                                          @change=${() => msg.id !== undefined && this.toggleTarget({ kind: "message", message_id: msg.id })}
+                                                                      ></ha-checkbox>
+                                                                  ` : nothing}
+                                                                  <intentsity-chat-message .message=${msg}></intentsity-chat-message>
+                                                              </div>
                                                           `)}
                                                       </div>
                                                   </section>
                                                   <section class="panel">
-                                                      <h4>Corrected</h4>
+                                                      <h4>
+                                                          Corrected
+                                                          ${this.selectionMode && chat.corrected ? html`
+                                                              <ha-checkbox
+                                                                  class="select-checkbox"
+                                                                  .checked=${this.isSelected({
+                                                                      kind: "corrected_chat",
+                                                                      conversation_id: chat.corrected.conversation_id,
+                                                                      pipeline_run_id: chat.corrected.pipeline_run_id,
+                                                                  })}
+                                                                  @change=${() => this.toggleTarget({
+                                                                      kind: "corrected_chat",
+                                                                      conversation_id: chat.corrected!.conversation_id,
+                                                                      pipeline_run_id: chat.corrected!.pipeline_run_id,
+                                                                  })}
+                                                              ></ha-checkbox>
+                                                          ` : nothing}
+                                                      </h4>
                                                       ${(this.drafts[chatId] ?? []).map((draft, index) => html`
                                                           <div class="draft-message">
                                                               <div class="draft-controls">
+                                                                  ${this.selectionMode && draft.corrected_message_id ? html`
+                                                                      <ha-checkbox
+                                                                          class="select-checkbox"
+                                                                          .checked=${this.isSelected({
+                                                                              kind: "corrected_message",
+                                                                              corrected_message_id: draft.corrected_message_id,
+                                                                          })}
+                                                                          @change=${() => this.toggleTarget({
+                                                                              kind: "corrected_message",
+                                                                              corrected_message_id: draft.corrected_message_id!,
+                                                                          })}
+                                                                      ></ha-checkbox>
+                                                                  ` : nothing}
                                                                   <ha-button @click=${() => this.insertDraft(chatId, index)}>
                                                                       <ha-icon icon="mdi:plus-box"></ha-icon>
                                                                       Insert above
@@ -1209,6 +1368,14 @@ class IntentsityPanel extends LitElement {
         });
     }
 
+    private async deleteTargets(targets: TombstoneTarget[]): Promise<void> {
+        const conn = await this.getConnection();
+        await conn.sendMessagePromise({
+            type: TOMBSTONE_COMMAND,
+            targets,
+        });
+    }
+
     protected firstUpdated(): void {
         void this.loadChats();
     }
@@ -1304,6 +1471,7 @@ class IntentsityPanel extends LitElement {
             <intentsity-chat-list
                 .chats=${this.chats}
                 .onSaveCorrected=${this.saveCorrected.bind(this)}
+                .onDeleteTargets=${this.deleteTargets.bind(this)}
             ></intentsity-chat-list>
         `;
     }
