@@ -78,6 +78,43 @@ async def test_chat_log_subscription_persists_messages(hass: HomeAssistant) -> N
 
 
 @pytest.mark.asyncio
+async def test_fetch_recent_chats_orders_messages_by_timestamp(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    conversation_id, pipeline_run_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=base_time,
+            conversation_id="conv-order",
+            pipeline_run_id="run-order",
+            run_timestamp=base_time,
+            messages=[
+                ChatMessage(
+                    timestamp=base_time.replace(minute=1),
+                    sender="assistant",
+                    text="Second",
+                ),
+                ChatMessage(
+                    timestamp=base_time.replace(minute=0),
+                    sender="user",
+                    text="First",
+                ),
+            ],
+        ),
+    )
+
+    chats = db.fetch_recent_chats(hass, 1)
+    assert chats[0].conversation_id == conversation_id
+    assert chats[0].pipeline_run_id == pipeline_run_id
+    assert [msg.text for msg in chats[0].messages] == ["First", "Second"]
+
+
+@pytest.mark.asyncio
 async def test_corrected_chat_persists_with_reordered_messages(
     hass: HomeAssistant,
 ) -> None:
