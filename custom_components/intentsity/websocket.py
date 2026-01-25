@@ -16,13 +16,15 @@ from .const import (
     WS_CMD_SUBSCRIBE_CHATS,
 )
 from .db import fetch_recent_chats, upsert_corrected_chat
-from .models import ChatListResponse, CorrectedChatSaveRequest
+from .models import ChatListRequest, ChatListResponse, CorrectedChatSaveRequest
 
 
 _EVENT_LIMIT_SCHEMA = vol.All(
     vol.Coerce(int),
     vol.Range(min=MIN_EVENT_LIMIT, max=MAX_EVENT_LIMIT),
 )
+_CORRECTED_FILTER_SCHEMA = vol.In(["all", "corrected", "uncorrected"])
+_DATE_FILTER_SCHEMA = vol.Any(None, vol.Coerce(str))
 
 
 def async_register_commands(hass: HomeAssistant) -> None:
@@ -33,8 +35,27 @@ def async_register_commands(hass: HomeAssistant) -> None:
 
 
 
-async def _async_fetch_chats_payload(hass: HomeAssistant, limit: int) -> dict:
-    chats = await hass.async_add_executor_job(fetch_recent_chats, hass, limit)
+def _normalize_corrected_filter(value: str) -> bool | None:
+    if value == "corrected":
+        return True
+    if value == "uncorrected":
+        return False
+    return None
+
+
+async def _async_fetch_chats_payload(
+    hass: HomeAssistant,
+    request: ChatListRequest,
+) -> dict:
+    corrected = _normalize_corrected_filter(request.corrected)
+    chats = await hass.async_add_executor_job(
+        fetch_recent_chats,
+        hass,
+        request.limit,
+        corrected,
+        request.start,
+        request.end,
+    )
     if isinstance(chats, ChatListResponse):
         return chats.model_dump(mode="json")
     return ChatListResponse(chats=chats).model_dump(mode="json")
@@ -45,9 +66,9 @@ async def _async_send_chats_result(
     hass: HomeAssistant,
     connection: websocket_api.connection.ActiveConnection,
     request_id: int,
-    limit: int,
+    request: ChatListRequest,
 ) -> None:
-    payload = await _async_fetch_chats_payload(hass, limit)
+    payload = await _async_fetch_chats_payload(hass, request)
     connection.send_result(request_id, payload)
 
 
@@ -56,9 +77,9 @@ async def _async_send_chats_event(
     hass: HomeAssistant,
     connection: websocket_api.connection.ActiveConnection,
     request_id: int,
-    limit: int,
+    request: ChatListRequest,
 ) -> None:
-    payload = await _async_fetch_chats_payload(hass, limit)
+    payload = await _async_fetch_chats_payload(hass, request)
     connection.send_message(websocket_api.messages.event_message(request_id, payload))
 
 
@@ -66,13 +87,18 @@ async def _async_send_chats_event(
     {
         vol.Required("type"): WS_CMD_LIST_CHATS,
         vol.Optional("limit", default=DEFAULT_EVENT_LIMIT): _EVENT_LIMIT_SCHEMA,
+        vol.Optional("corrected", default="all"): _CORRECTED_FILTER_SCHEMA,
+        vol.Optional("start"): _DATE_FILTER_SCHEMA,
+        vol.Optional("end"): _DATE_FILTER_SCHEMA,
     }
 )
 @callback
 def websocket_list_chats(hass: HomeAssistant, connection: websocket_api.connection.ActiveConnection, msg: dict) -> None:
     """Return a snapshot of recent chats."""
-    limit: int = msg["limit"]
-    hass.async_create_task(_async_send_chats_result(hass, connection, msg["id"], limit))
+    request = ChatListRequest.model_validate(msg)
+    hass.async_create_task(
+        _async_send_chats_result(hass, connection, msg["id"], request)
+    )
 
 
 
@@ -80,6 +106,9 @@ def websocket_list_chats(hass: HomeAssistant, connection: websocket_api.connecti
     {
         vol.Required("type"): WS_CMD_SUBSCRIBE_CHATS,
         vol.Optional("limit", default=DEFAULT_EVENT_LIMIT): _EVENT_LIMIT_SCHEMA,
+        vol.Optional("corrected", default="all"): _CORRECTED_FILTER_SCHEMA,
+        vol.Optional("start"): _DATE_FILTER_SCHEMA,
+        vol.Optional("end"): _DATE_FILTER_SCHEMA,
     }
 )
 @callback
@@ -89,12 +118,12 @@ def websocket_subscribe_chats(
     msg: dict,
 ) -> None:
     """Subscribe to live chat event updates."""
-    limit: int = msg["limit"]
     request_id: int = msg["id"]
     connection.send_result(request_id)
+    request = ChatListRequest.model_validate(msg)
 
     async def _push_snapshot() -> None:
-        await _async_send_chats_event(hass, connection, request_id, limit)
+        await _async_send_chats_event(hass, connection, request_id, request)
 
     @callback
     def _handle_new_event(*_: object) -> None:

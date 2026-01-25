@@ -1171,11 +1171,17 @@ class IntentsityPanel extends LitElement {
     private async loadChats(): Promise<void> {
         const conn = await this.getConnection();
         this.teardownSubscription();
+
+        const start = this.toApiFilter(this.startFilter);
+        const end = this.toApiFilter(this.endFilter);
         
         // Initial snapshot
         const response = await conn.sendMessagePromise<{ chats?: Chat[]; }>(({
             type: LIST_COMMAND,
             limit: this.limit,
+            corrected: this.correctedFilter,
+            start,
+            end,
         } as any));
         this.chats = response.chats ?? [];
 
@@ -1183,6 +1189,9 @@ class IntentsityPanel extends LitElement {
         this.unsubscribe = await conn.subscribeMessage(this.subscriptionHandler, (({ 
             type: SUBSCRIBE_COMMAND,
             limit: this.limit,
+            corrected: this.correctedFilter,
+            start,
+            end,
         } as any) as any));
     }
 
@@ -1220,47 +1229,30 @@ class IntentsityPanel extends LitElement {
         const input = event.currentTarget as HTMLInputElement | null;
         const value = (detail?.value ?? input?.value ?? "all") as "all" | "corrected" | "uncorrected";
         this.correctedFilter = value;
+        void this.loadChats();
     }
 
     private handleStartFilter(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         this.startFilter = input.value;
+        void this.loadChats();
     }
 
     private handleEndFilter(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         this.endFilter = input.value;
+        void this.loadChats();
     }
 
-    private toFilterEpoch(value: string): number | null {
+    private toApiFilter(value: string): string | undefined {
         if (!value) {
-            return null;
+            return undefined;
         }
-        const timestamp = new Date(value).getTime();
-        return Number.isNaN(timestamp) ? null : timestamp;
-    }
-
-    private chatMatchesFilters(chat: Chat): boolean {
-        if (this.correctedFilter === "corrected" && !chat.corrected) {
-            return false;
+        const timestamp = new Date(value);
+        if (Number.isNaN(timestamp.getTime())) {
+            return undefined;
         }
-        if (this.correctedFilter === "uncorrected" && chat.corrected) {
-            return false;
-        }
-        const chatTimestamp = getChatTimestamp(chat);
-        const start = this.toFilterEpoch(this.startFilter);
-        if (start !== null && chatTimestamp < start) {
-            return false;
-        }
-        const end = this.toFilterEpoch(this.endFilter);
-        if (end !== null && chatTimestamp > end) {
-            return false;
-        }
-        return true;
-    }
-
-    private get filteredChats(): Chat[] {
-        return this.chats.filter((chat) => this.chatMatchesFilters(chat));
+        return timestamp.toISOString();
     }
 
     render() {
@@ -1310,7 +1302,7 @@ class IntentsityPanel extends LitElement {
             </ha-card>
 
             <intentsity-chat-list
-                .chats=${this.filteredChats}
+                .chats=${this.chats}
                 .onSaveCorrected=${this.saveCorrected.bind(this)}
             ></intentsity-chat-list>
         `;

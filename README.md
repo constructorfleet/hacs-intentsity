@@ -27,8 +27,8 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Use the corrected panel to reorder messages, insert new messages anywhere in the transcript, copy/paste messages across chats, edit tool calls/metadata, and save the corrected transcript.
 - Use the "Refresh" button to reload the history or watch the live feed as you use Assist.
 - Developers can access the logs via WebSocket:
-	- `intentsity/chats/list` with a `limit` to fetch snapshots.
-	- `intentsity/chats/subscribe` for live push updates.
+	- `intentsity/chats/list` with a `limit` and optional `corrected`, `start`, `end` filters to fetch snapshots.
+	- `intentsity/chats/subscribe` with the same optional filters for live push updates.
 	- `intentsity/chats/corrected/save` with `conversation_id`, `pipeline_run_id`, and `messages` to persist corrections.
 
 ## Development Notes

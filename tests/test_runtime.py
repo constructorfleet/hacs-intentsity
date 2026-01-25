@@ -115,6 +115,82 @@ async def test_fetch_recent_chats_orders_messages_by_timestamp(
 
 
 @pytest.mark.asyncio
+async def test_fetch_recent_chats_filters_by_corrected_and_date(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage, CorrectedChatMessage
+
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    conversation_id_a, pipeline_run_id_a = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=base_time,
+            conversation_id="conv-filter-a",
+            pipeline_run_id="run-a",
+            run_timestamp=base_time,
+            messages=[
+                ChatMessage(
+                    timestamp=base_time,
+                    sender="user",
+                    text="A",
+                ),
+            ],
+        ),
+    )
+    conversation_id_b, pipeline_run_id_b = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=base_time.replace(day=2),
+            conversation_id="conv-filter-b",
+            pipeline_run_id="run-b",
+            run_timestamp=base_time.replace(day=2),
+            messages=[
+                ChatMessage(
+                    timestamp=base_time.replace(day=2),
+                    sender="user",
+                    text="B",
+                ),
+            ],
+        ),
+    )
+
+    db.upsert_corrected_chat(
+        hass,
+        conversation_id_b,
+        pipeline_run_id_b,
+        [
+            CorrectedChatMessage(
+                original_message_id=None,
+                timestamp=base_time.replace(day=2),
+                sender="assistant",
+                text="Corrected",
+            )
+        ],
+    )
+
+    corrected_only = db.fetch_recent_chats(hass, corrected=True)
+    assert [chat.conversation_id for chat in corrected_only] == [
+        conversation_id_b
+    ]
+
+    uncorrected_only = db.fetch_recent_chats(hass, corrected=False)
+    assert [chat.conversation_id for chat in uncorrected_only] == [
+        conversation_id_a
+    ]
+
+    filtered_by_date = db.fetch_recent_chats(
+        hass,
+        start=base_time.replace(day=2),
+        end=base_time.replace(day=2),
+    )
+    assert [chat.conversation_id for chat in filtered_by_date] == [
+        conversation_id_b
+    ]
+
+
+@pytest.mark.asyncio
 async def test_corrected_chat_persists_with_reordered_messages(
     hass: HomeAssistant,
 ) -> None:
