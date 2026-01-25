@@ -30,6 +30,11 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 	- `intentsity/chats/list` with a `limit` and optional `corrected`, `start`, `end` filters to fetch snapshots.
 	- `intentsity/chats/subscribe` with the same optional filters for live push updates.
 	- `intentsity/chats/corrected/save` with `conversation_id`, `pipeline_run_id`, and `messages` to persist corrections.
+	- `intentsity/chats/tombstone` with `targets` to soft-delete chats or messages. Each target includes:
+		- chat: `{ kind: "chat", conversation_id, pipeline_run_id }`
+		- message: `{ kind: "message", message_id }`
+		- corrected chat: `{ kind: "corrected_chat", conversation_id, pipeline_run_id }`
+		- corrected message: `{ kind: "corrected_message", corrected_message_id }`
 
 ## Development Notes
 - Data models are strictly validated via Pydantic (`models.py`).
@@ -39,6 +44,7 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Schema v3 uses `conversation_id` as the primary key for chats and corrected chats; existing installs are migrated on startup.
 - Schema v4 adds `pipeline_run_id` to chat identity (composite key with `conversation_id`) and propagates it through corrected chats; existing installs are migrated on startup (legacy runs are tagged with `pipeline_run_id` = `legacy`).
 - Schema v5 adds `run_timestamp` to chats and persists event timestamps on messages; existing installs are migrated on startup (legacy runs use `created_at` as `run_timestamp`).
+- Schema v6 adds `deleted_at` tombstones for chats and messages to support soft deletes; existing installs are migrated on startup.
 - UI source is in `js/panel/main.tsx` (LitElement + TypeScript).
 - Run `npm run build` to compile the panel into `custom_components/intentsity/panel.js`.
 - Run `uv run pytest` to execute the test suite.

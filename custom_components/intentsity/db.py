@@ -20,6 +20,7 @@ from sqlalchemy import (
     func,
     select,
     text,
+    tuple_,
 )
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
@@ -34,7 +35,13 @@ from sqlalchemy.orm import (
 
 
 from .const import DB_NAME, DOMAIN
-from .models import Chat, ChatMessage, CorrectedChat, CorrectedChatMessage
+from .models import (
+    Chat,
+    ChatMessage,
+    CorrectedChat,
+    CorrectedChatMessage,
+    TombstoneTarget,
+)
 from .utils import parse_timestamp
 
 _CLIENT_KEY: Final = "db_client"
@@ -71,6 +78,9 @@ class ChatRow(_DBBase):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
     )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     messages: Mapped[list["ChatMessageRow"]] = relationship(
         back_populates="chat",
         cascade="all, delete-orphan",
@@ -105,6 +115,9 @@ class ChatMessageRow(_DBBase):
     sender: Mapped[str] = mapped_column(String, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     chat: Mapped[ChatRow] = relationship(back_populates="messages")
 
@@ -133,6 +146,9 @@ class CorrectedChatRow(_DBBase):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     messages: Mapped[list["CorrectedChatMessageRow"]] = relationship(
         back_populates="corrected_chat",
@@ -168,6 +184,9 @@ class CorrectedChatMessageRow(_DBBase):
     sender: Mapped[str] = mapped_column(String, nullable=False)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     corrected_chat: Mapped[CorrectedChatRow] = relationship(back_populates="messages")
 
@@ -509,6 +528,22 @@ class IntentsityDBClient:
 
                 conn.execute(text("PRAGMA foreign_keys=ON"))
 
+            for table_name in (
+                "chats",
+                "chat_messages",
+                "corrected_chats",
+                "corrected_chat_messages",
+            ):
+                if not _table_exists(table_name):
+                    continue
+                columns = _columns(table_name)
+                if "deleted_at" not in columns:
+                    conn.execute(
+                        text(
+                            f"ALTER TABLE {table_name} ADD COLUMN deleted_at DATETIME"
+                        )
+                    )
+
     # New chat persistence methods
     def upsert_chat(self, chat: Chat) -> tuple[str, str]:
         engine = self._get_engine()
@@ -647,6 +682,7 @@ class IntentsityDBClient:
                 session.flush()
             else:
                 corrected.updated_at = now
+                corrected.deleted_at = None
                 corrected.messages.clear()
                 session.flush()
 
@@ -675,19 +711,25 @@ class IntentsityDBClient:
         engine = self._get_engine()
         with Session(engine) as session:
             run_timestamp = func.coalesce(ChatRow.run_timestamp, ChatRow.created_at)
-            stmt = select(ChatRow).order_by(ChatRow.created_at.desc())
+            stmt = select(ChatRow).where(ChatRow.deleted_at.is_(None)).order_by(
+                ChatRow.created_at.desc()
+            )
             if corrected is True:
                 stmt = stmt.join(
                     CorrectedChatRow,
                     (CorrectedChatRow.original_conversation_id == ChatRow.conversation_id)
                     & (CorrectedChatRow.original_pipeline_run_id == ChatRow.pipeline_run_id),
                 )
+                stmt = stmt.where(CorrectedChatRow.deleted_at.is_(None))
             elif corrected is False:
                 stmt = stmt.outerjoin(
                     CorrectedChatRow,
                     (CorrectedChatRow.original_conversation_id == ChatRow.conversation_id)
                     & (CorrectedChatRow.original_pipeline_run_id == ChatRow.pipeline_run_id),
-                ).where(CorrectedChatRow.conversation_id.is_(None))
+                ).where(
+                    (CorrectedChatRow.conversation_id.is_(None))
+                    | (CorrectedChatRow.deleted_at.is_not(None))
+                )
             if start is not None:
                 stmt = stmt.where(run_timestamp >= start)
             if end is not None:
@@ -739,7 +781,11 @@ class IntentsityDBClient:
                         == ChatRow.pipeline_run_id
                     ),
                 )
-                .where(CorrectedChatRow.conversation_id.is_(None))
+                .where(ChatRow.deleted_at.is_(None))
+                .where(
+                    (CorrectedChatRow.conversation_id.is_(None))
+                    | (CorrectedChatRow.deleted_at.is_not(None))
+                )
             )
             return int(session.scalar(stmt) or 0)
 
@@ -771,6 +817,70 @@ class IntentsityDBClient:
             if corrected_row is None:
                 return
             session.delete(corrected_row)
+            session.commit()
+
+    def tombstone_targets(self, targets: list[TombstoneTarget]) -> None:
+        if not targets:
+            return
+        engine = self._get_engine()
+        now = _utcnow()
+        chat_keys: list[tuple[str, str]] = []
+        corrected_chat_keys: list[tuple[str, str]] = []
+        message_ids: list[int] = []
+        corrected_message_ids: list[int] = []
+
+        for target in targets:
+            if target.kind == "chat":
+                chat_keys.append((target.conversation_id, target.pipeline_run_id))  # type: ignore[arg-type]
+            elif target.kind == "message":
+                message_ids.append(target.message_id)  # type: ignore[arg-type]
+            elif target.kind == "corrected_chat":
+                corrected_chat_keys.append((target.conversation_id, target.pipeline_run_id))  # type: ignore[arg-type]
+            elif target.kind == "corrected_message":
+                corrected_message_ids.append(target.corrected_message_id)  # type: ignore[arg-type]
+
+        with Session(engine) as session:
+            if chat_keys:
+                session.query(ChatRow).filter(
+                    tuple_(ChatRow.conversation_id, ChatRow.pipeline_run_id).in_(chat_keys)
+                ).update({ChatRow.deleted_at: now}, synchronize_session=False)
+                session.query(ChatMessageRow).filter(
+                    tuple_(ChatMessageRow.chat_id, ChatMessageRow.pipeline_run_id).in_(chat_keys)
+                ).update({ChatMessageRow.deleted_at: now}, synchronize_session=False)
+                session.query(CorrectedChatRow).filter(
+                    tuple_(
+                        CorrectedChatRow.original_conversation_id,
+                        CorrectedChatRow.original_pipeline_run_id,
+                    ).in_(chat_keys)
+                ).update({CorrectedChatRow.deleted_at: now}, synchronize_session=False)
+                session.query(CorrectedChatMessageRow).filter(
+                    tuple_(
+                        CorrectedChatMessageRow.corrected_chat_id,
+                        CorrectedChatMessageRow.corrected_pipeline_run_id,
+                    ).in_(chat_keys)
+                ).update({CorrectedChatMessageRow.deleted_at: now}, synchronize_session=False)
+
+            if corrected_chat_keys:
+                session.query(CorrectedChatRow).filter(
+                    tuple_(CorrectedChatRow.conversation_id, CorrectedChatRow.pipeline_run_id).in_(corrected_chat_keys)
+                ).update({CorrectedChatRow.deleted_at: now}, synchronize_session=False)
+                session.query(CorrectedChatMessageRow).filter(
+                    tuple_(
+                        CorrectedChatMessageRow.corrected_chat_id,
+                        CorrectedChatMessageRow.corrected_pipeline_run_id,
+                    ).in_(corrected_chat_keys)
+                ).update({CorrectedChatMessageRow.deleted_at: now}, synchronize_session=False)
+
+            if message_ids:
+                session.query(ChatMessageRow).filter(
+                    ChatMessageRow.id.in_(message_ids)
+                ).update({ChatMessageRow.deleted_at: now}, synchronize_session=False)
+
+            if corrected_message_ids:
+                session.query(CorrectedChatMessageRow).filter(
+                    CorrectedChatMessageRow.id.in_(corrected_message_ids)
+                ).update({CorrectedChatMessageRow.deleted_at: now}, synchronize_session=False)
+
             session.commit()
 
     def dispose(self) -> None:
@@ -892,6 +1002,10 @@ def delete_corrected_chat(
     )
 
 
+def tombstone_targets(hass: HomeAssistant, targets: list[TombstoneTarget]) -> None:
+    return _get_client(hass).tombstone_targets(targets)
+
+
 def _row_to_chat(row: ChatRow) -> Chat:
     messages = [
         ChatMessage(
@@ -902,11 +1016,15 @@ def _row_to_chat(row: ChatRow) -> Chat:
             sender=msg.sender,
             text=msg.text,
             data=orjson.loads(msg.data) if msg.data else {},
+            deleted_at=parse_timestamp(msg.deleted_at)
+            if msg.deleted_at is not None
+            else None,
         )
         for msg in row.messages
+        if msg.deleted_at is None
     ]
     corrected = None
-    if row.corrected is not None:
+    if row.corrected is not None and row.corrected.deleted_at is None:
         corrected_messages = [
             CorrectedChatMessage(
                 id=msg.id,
@@ -917,8 +1035,12 @@ def _row_to_chat(row: ChatRow) -> Chat:
                 sender=msg.sender,
                 text=msg.text,
                 data=orjson.loads(msg.data) if msg.data else {},
+                deleted_at=parse_timestamp(msg.deleted_at)
+                if msg.deleted_at is not None
+                else None,
             )
             for msg in row.corrected.messages
+            if msg.deleted_at is None
         ]
         corrected = CorrectedChat(
             conversation_id=row.corrected.conversation_id,
@@ -928,6 +1050,9 @@ def _row_to_chat(row: ChatRow) -> Chat:
             created_at=parse_timestamp(row.corrected.created_at),
             updated_at=parse_timestamp(row.corrected.updated_at),
             messages=corrected_messages,
+            deleted_at=parse_timestamp(row.corrected.deleted_at)
+            if row.corrected.deleted_at is not None
+            else None,
         )
     return Chat(
         conversation_id=row.conversation_id,
@@ -936,4 +1061,7 @@ def _row_to_chat(row: ChatRow) -> Chat:
         created_at=parse_timestamp(row.created_at),
         messages=messages,
         corrected=corrected,
+        deleted_at=parse_timestamp(row.deleted_at)
+        if row.deleted_at is not None
+        else None,
     )

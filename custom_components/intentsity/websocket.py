@@ -14,9 +14,15 @@ from .const import (
     WS_CMD_LIST_CHATS,
     WS_CMD_SAVE_CORRECTED_CHAT,
     WS_CMD_SUBSCRIBE_CHATS,
+    WS_CMD_TOMBSTONE,
 )
-from .db import fetch_recent_chats, upsert_corrected_chat
-from .models import ChatListRequest, ChatListResponse, CorrectedChatSaveRequest
+from .db import fetch_recent_chats, tombstone_targets, upsert_corrected_chat
+from .models import (
+    ChatListRequest,
+    ChatListResponse,
+    CorrectedChatSaveRequest,
+    TombstoneRequest,
+)
 
 
 _EVENT_LIMIT_SCHEMA = vol.All(
@@ -32,6 +38,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_chats)
     websocket_api.async_register_command(hass, websocket_subscribe_chats)
     websocket_api.async_register_command(hass, websocket_save_corrected_chat)
+    websocket_api.async_register_command(hass, websocket_tombstone_targets)
 
 
 
@@ -163,3 +170,30 @@ def websocket_save_corrected_chat(
         connection.send_result(msg["id"])
 
     hass.async_create_task(_save())
+
+
+@websocket_api.decorators.websocket_command(
+    {
+        vol.Required("type"): WS_CMD_TOMBSTONE,
+        vol.Required("targets"): list,
+    }
+)
+@callback
+def websocket_tombstone_targets(
+    hass: HomeAssistant,
+    connection: websocket_api.connection.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Tombstone chats or messages."""
+    request = TombstoneRequest.model_validate(msg)
+
+    async def _tombstone() -> None:
+        await hass.async_add_executor_job(
+            tombstone_targets,
+            hass,
+            request.targets,
+        )
+        async_dispatcher_send(hass, SIGNAL_EVENT_RECORDED)
+        connection.send_result(msg["id"])
+
+    hass.async_create_task(_tombstone())

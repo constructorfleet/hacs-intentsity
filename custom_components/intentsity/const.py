@@ -1,7 +1,7 @@
 DOMAIN = "intentsity"
 
 DB_NAME = "intentsity.db"
-DB_SCHEMA_VERSION = 5
+DB_SCHEMA_VERSION = 6
 
 COORDINATOR_KEY = "coordinator"
 
@@ -17,3 +17,4 @@ DATA_API_REGISTERED = "api_registered"
 WS_CMD_LIST_CHATS = "intentsity/chats/list"
 WS_CMD_SUBSCRIBE_CHATS = "intentsity/chats/subscribe"
 WS_CMD_SAVE_CORRECTED_CHAT = "intentsity/chats/corrected/save"
+WS_CMD_TOMBSTONE = "intentsity/chats/tombstone"
