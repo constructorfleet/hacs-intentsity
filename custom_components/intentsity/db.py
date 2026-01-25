@@ -682,6 +682,8 @@ class IntentsityDBClient:
                 session.flush()
             else:
                 corrected.updated_at = now
+                # Un-tombstone any previously soft-deleted corrected chat when it is updated:
+                # setting deleted_at back to None marks this corrected chat as active again.
                 corrected.deleted_at = None
                 corrected.messages.clear()
                 session.flush()
