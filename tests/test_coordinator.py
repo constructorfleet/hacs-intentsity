@@ -21,6 +21,7 @@ from custom_components.intentsity.coordinator import (
     _process_run_start,
 )
 from custom_components.intentsity.models import Chat
+from custom_components.intentsity.utils import parse_timestamp
 
 
 def _make_pipeline() -> Pipeline:
@@ -59,7 +60,7 @@ def test_process_run_start() -> None:
     assert chat is not None
     assert chat.conversation_id == "conv-1"
     assert chat.pipeline_run_id == "run-1"
-    assert chat.run_timestamp == now
+    assert chat.run_timestamp == parse_timestamp(now)
 
 
 def test_process_intent_start_appends_message() -> None:
@@ -79,7 +80,7 @@ def test_process_intent_start_appends_message() -> None:
     assert len(chat.messages) == 1
     assert chat.messages[0].text == "Hello"
     assert chat.messages[0].data == {"conversation_id": "conv-2", "meta": "x"}
-    assert chat.messages[0].timestamp == event.timestamp
+    assert chat.messages[0].timestamp == parse_timestamp(event.timestamp)
 
 
 def test_process_intent_progress_tool_calls_and_content() -> None:
@@ -97,7 +98,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     updated = _process_intent_progress(event, chat)
     assert updated is chat
     assert chat.messages[0].sender == "tool_calls"
-    assert chat.messages[0].timestamp == event.timestamp
+    assert chat.messages[0].timestamp == parse_timestamp(event.timestamp)
 
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
@@ -107,7 +108,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     assert updated is chat
     assert chat.messages[1].text == "ok"
     assert chat.messages[1].sender == "tool_result"
-    assert chat.messages[1].timestamp == event.timestamp
+    assert chat.messages[1].timestamp == parse_timestamp(event.timestamp)
 
     event = PipelineEvent(
         PipelineEventType.INTENT_PROGRESS,
@@ -116,7 +117,7 @@ def test_process_intent_progress_tool_calls_and_content() -> None:
     updated = _process_intent_progress(event, chat)
     assert updated is not None
     assert chat.messages[-1].text == "Hi"
-    assert chat.messages[-1].timestamp == event.timestamp
+    assert chat.messages[-1].timestamp == parse_timestamp(event.timestamp)
 
 
 def test_process_intent_progress_tool_calls_skip_content() -> None:
@@ -141,7 +142,7 @@ def test_process_intent_progress_tool_calls_skip_content() -> None:
     assert updated is chat
     assert len(chat.messages) == 1
     assert chat.messages[0].text == ""
-    assert chat.messages[0].timestamp == event.timestamp
+    assert chat.messages[0].timestamp == parse_timestamp(event.timestamp)
 
 
 @pytest.mark.asyncio
@@ -164,6 +165,12 @@ async def test_async_update_data_persists_chat(hass, monkeypatch) -> None:
         PipelineEvent(
             PipelineEventType.INTENT_PROGRESS,
             {"chat_log_delta": {"content": "Pong", "role": "assistant"}},
+        )
+    )
+    run_debug.events.append(
+        PipelineEvent(
+            PipelineEventType.INTENT_END,
+            {"response": {"speech": {"plain": {"speech": "Pong"}}}},
         )
     )
 
@@ -192,6 +199,7 @@ async def test_async_update_data_persists_chat(hass, monkeypatch) -> None:
         return chat.conversation_id, chat.pipeline_run_id
 
     monkeypatch.setattr(db, "upsert_chat", _upsert_chat)
+    monkeypatch.setattr(db, "fetch_recent_chats", lambda _hass: [])
     monkeypatch.setattr(db, "count_uncorrected_chats", lambda _hass: 2)
 
     coordinator = IntentsityCoordinator(hass)
@@ -199,7 +207,7 @@ async def test_async_update_data_persists_chat(hass, monkeypatch) -> None:
 
     assert persisted["chat"].conversation_id == "conv-4"
     assert persisted["chat"].pipeline_run_id == "run-1"
-    assert persisted["chat"].run_timestamp == run_debug.timestamp
+    assert persisted["chat"].run_timestamp == parse_timestamp(run_debug.timestamp)
     assert data["uncorrected_count"] == 2
 
 

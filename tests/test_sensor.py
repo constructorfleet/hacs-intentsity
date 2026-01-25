@@ -14,6 +14,7 @@ async def test_uncorrected_chats_sensor_value(hass) -> None:
     coordinator = DataUpdateCoordinator(
         hass,
         logger=None,
+        config_entry=None,
         name="intentsity",
         update_method=None,
     )
@@ -27,6 +28,7 @@ async def test_async_setup_entry_adds_entity(hass) -> None:
     coordinator = DataUpdateCoordinator(
         hass,
         logger=None,
+        config_entry=None,
         name="intentsity",
         update_method=None,
     )
