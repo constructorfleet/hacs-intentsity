@@ -691,19 +691,22 @@ class IntentsityChatList extends LitElement {
         this.drafts = { ...this.drafts, [chatId]: next };
     }
 
-    private copyDraft(chatId: string, index: number): void {
-        const draft = this.drafts[chatId]?.[index];
-        if (!draft) {
-            return;
-        }
-        const copied: DraftMessage = {
+    private cloneDraftWithTimestamp(draft: DraftMessage): DraftMessage {
+        return {
             original_message_id: null,
             timestamp: new Date().toISOString(),
             sender: draft.sender,
             text: draft.text,
             dataText: draft.dataText,
         };
-        this.clipboard = copied;
+    }
+
+    private copyDraft(chatId: string, index: number): void {
+        const draft = this.drafts[chatId]?.[index];
+        if (!draft) {
+            return;
+        }
+        this.clipboard = this.cloneDraftWithTimestamp(draft);
         this.showToast("Message copied.", "success");
     }
 
@@ -714,7 +717,7 @@ class IntentsityChatList extends LitElement {
         const existing = this.drafts[chatId] ?? [];
         const clamped = Math.max(0, Math.min(index, existing.length));
         const next = [...existing];
-        next.splice(clamped, 0, { ...this.clipboard, timestamp: new Date().toISOString() });
+        next.splice(clamped, 0, this.cloneDraftWithTimestamp(this.clipboard));
         this.drafts = { ...this.drafts, [chatId]: next };
     }
 
