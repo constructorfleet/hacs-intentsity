@@ -1100,6 +1100,9 @@ class IntentsityChatList extends LitElement {
 class IntentsityPanel extends LitElement {
     @state() private chats: Chat[] = [];
     @state() private limit = DEFAULT_LIMIT;
+    @state() private correctedFilter: "all" | "corrected" | "uncorrected" = "all";
+    @state() private startFilter = "";
+    @state() private endFilter = "";
 
     private unsubscribe?: HassSubscription;
     private connectionPromise?: Promise<HassConnection>;
@@ -1123,6 +1126,17 @@ class IntentsityPanel extends LitElement {
                 align-items: center;
                 gap: 12px;
                 margin-bottom: 16px;
+                flex-wrap: wrap;
+            }
+            .control-group {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }
+            .control-spacer {
+                flex: 1;
+                min-width: 12px;
             }
         `
     ];
@@ -1201,6 +1215,54 @@ class IntentsityPanel extends LitElement {
         void this.loadChats();
     }
 
+    private handleCorrectedFilter(event: Event) {
+        const detail = (event as CustomEvent).detail as { value?: string } | undefined;
+        const input = event.currentTarget as HTMLInputElement | null;
+        const value = (detail?.value ?? input?.value ?? "all") as "all" | "corrected" | "uncorrected";
+        this.correctedFilter = value;
+    }
+
+    private handleStartFilter(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        this.startFilter = input.value;
+    }
+
+    private handleEndFilter(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        this.endFilter = input.value;
+    }
+
+    private toFilterEpoch(value: string): number | null {
+        if (!value) {
+            return null;
+        }
+        const timestamp = new Date(value).getTime();
+        return Number.isNaN(timestamp) ? null : timestamp;
+    }
+
+    private chatMatchesFilters(chat: Chat): boolean {
+        if (this.correctedFilter === "corrected" && !chat.corrected) {
+            return false;
+        }
+        if (this.correctedFilter === "uncorrected" && chat.corrected) {
+            return false;
+        }
+        const chatTimestamp = getChatTimestamp(chat);
+        const start = this.toFilterEpoch(this.startFilter);
+        if (start !== null && chatTimestamp < start) {
+            return false;
+        }
+        const end = this.toFilterEpoch(this.endFilter);
+        if (end !== null && chatTimestamp > end) {
+            return false;
+        }
+        return true;
+    }
+
+    private get filteredChats(): Chat[] {
+        return this.chats.filter((chat) => this.chatMatchesFilters(chat));
+    }
+
     render() {
         return html`
             <ha-card>
@@ -1209,12 +1271,36 @@ class IntentsityPanel extends LitElement {
                     <p>Observational log of all Home Assistant Assist conversations.</p>
 
                     <div class="controls">
-                        <ha-textfield
-                            label="Show last"
-                            type="number"
-                            .value=${String(this.limit)}
-                            @change=${this.handleLimitChange}
-                        ></ha-textfield>
+                        <div class="control-group">
+                            <ha-textfield
+                                label="Show last"
+                                type="number"
+                                .value=${String(this.limit)}
+                                @change=${this.handleLimitChange}
+                            ></ha-textfield>
+                            <ha-textfield
+                                label="Start"
+                                type="datetime-local"
+                                .value=${this.startFilter}
+                                @change=${this.handleStartFilter}
+                            ></ha-textfield>
+                            <ha-textfield
+                                label="End"
+                                type="datetime-local"
+                                .value=${this.endFilter}
+                                @change=${this.handleEndFilter}
+                            ></ha-textfield>
+                            <ha-select
+                                label="Status"
+                                .value=${this.correctedFilter}
+                                @selected=${this.handleCorrectedFilter}
+                            >
+                                <mwc-list-item value="all">All</mwc-list-item>
+                                <mwc-list-item value="corrected">Corrected</mwc-list-item>
+                                <mwc-list-item value="uncorrected">Uncorrected</mwc-list-item>
+                            </ha-select>
+                        </div>
+                        <span class="control-spacer"></span>
                         <ha-button @click=${() => void this.loadChats()}>
                             <ha-icon icon="mdi:refresh"></ha-icon>
                             Refresh
@@ -1224,7 +1310,7 @@ class IntentsityPanel extends LitElement {
             </ha-card>
 
             <intentsity-chat-list
-                .chats=${this.chats}
+                .chats=${this.filteredChats}
                 .onSaveCorrected=${this.saveCorrected.bind(this)}
             ></intentsity-chat-list>
         `;
