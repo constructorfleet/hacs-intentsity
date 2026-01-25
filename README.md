@@ -23,7 +23,7 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 ## Usage
 - The sidebar panel shows the latest 100 conversations (adjustable up to 500).
 - Conversations are grouped by ID, showing both user and assistant messages with timestamps.
-- Use the corrected panel to reorder messages, insert new messages anywhere in the transcript, edit tool calls/metadata, and save the corrected transcript.
+- Use the corrected panel to reorder messages, insert new messages anywhere in the transcript, copy/paste messages across chats, edit tool calls/metadata, and save the corrected transcript.
 - Use the "Refresh" button to reload the history or watch the live feed as you use Assist.
 - Developers can access the logs via WebSocket:
 	- `intentsity/chats/list` with a `limit` to fetch snapshots.
