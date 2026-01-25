@@ -35,6 +35,7 @@ from sqlalchemy.orm import (
 
 from .const import DB_NAME, DOMAIN
 from .models import Chat, ChatMessage, CorrectedChat, CorrectedChatMessage
+from .utils import parse_timestamp
 
 _CLIENT_KEY: Final = "db_client"
 
@@ -871,7 +872,7 @@ def _row_to_chat(row: ChatRow) -> Chat:
             id=msg.id,
             chat_id=msg.chat_id,
             position=msg.position,
-            timestamp=msg.timestamp,
+            timestamp=parse_timestamp(msg.timestamp),
             sender=msg.sender,
             text=msg.text,
             data=orjson.loads(msg.data) if msg.data else {},
@@ -886,7 +887,7 @@ def _row_to_chat(row: ChatRow) -> Chat:
                 corrected_chat_id=msg.corrected_chat_id,
                 original_message_id=msg.original_message_id,
                 position=msg.position,
-                timestamp=msg.timestamp,
+                timestamp=parse_timestamp(msg.timestamp),
                 sender=msg.sender,
                 text=msg.text,
                 data=orjson.loads(msg.data) if msg.data else {},
@@ -898,15 +899,15 @@ def _row_to_chat(row: ChatRow) -> Chat:
             pipeline_run_id=row.corrected.pipeline_run_id,
             original_conversation_id=row.corrected.original_conversation_id,
             original_pipeline_run_id=row.corrected.original_pipeline_run_id,
-            created_at=row.corrected.created_at,
-            updated_at=row.corrected.updated_at,
+            created_at=parse_timestamp(row.corrected.created_at),
+            updated_at=parse_timestamp(row.corrected.updated_at),
             messages=corrected_messages,
         )
     return Chat(
         conversation_id=row.conversation_id,
         pipeline_run_id=row.pipeline_run_id,
-        run_timestamp=row.run_timestamp,
-        created_at=row.created_at,
+        run_timestamp=parse_timestamp(row.run_timestamp),
+        created_at=parse_timestamp(row.created_at),
         messages=messages,
         corrected=corrected,
     )

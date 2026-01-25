@@ -184,6 +184,81 @@ async def test_corrected_chat_persists_with_reordered_messages(
 
 
 @pytest.mark.asyncio
+async def test_corrected_chat_accepts_new_messages_in_between(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+    from custom_components.intentsity.models import (
+        Chat,
+        ChatMessage,
+        CorrectedChatMessage,
+    )
+
+    timestamp = datetime.now(timezone.utc)
+    conversation_id, pipeline_run_id = db.upsert_chat(
+        hass,
+        Chat(
+            created_at=timestamp,
+            conversation_id="conv-2b",
+            pipeline_run_id="run-2b",
+            run_timestamp=timestamp,
+            messages=[
+                ChatMessage(
+                    timestamp=timestamp,
+                    sender="user",
+                    text="First",
+                ),
+                ChatMessage(
+                    timestamp=timestamp,
+                    sender="assistant",
+                    text="Second",
+                ),
+            ],
+        ),
+    )
+
+    original = db.fetch_recent_chats(hass, 1)[0]
+    original_message_ids = [msg.id for msg in original.messages]
+
+    corrected_messages = [
+        CorrectedChatMessage(
+            original_message_id=original_message_ids[0],
+            timestamp=timestamp,
+            sender="user",
+            text="First",
+        ),
+        CorrectedChatMessage(
+            original_message_id=None,
+            timestamp=timestamp,
+            sender="assistant",
+            text="Inserted",
+            data={"note": "new"},
+        ),
+        CorrectedChatMessage(
+            original_message_id=original_message_ids[1],
+            timestamp=timestamp,
+            sender="assistant",
+            text="Second",
+        ),
+    ]
+
+    db.upsert_corrected_chat(
+        hass, conversation_id, pipeline_run_id, corrected_messages
+    )
+
+    chats = db.fetch_recent_chats(hass, 1)
+    corrected = chats[0].corrected
+    assert corrected is not None
+    assert [msg.original_message_id for msg in corrected.messages] == [
+        original_message_ids[0],
+        None,
+        original_message_ids[1],
+    ]
+    assert corrected.messages[1].text == "Inserted"
+    assert corrected.messages[1].data == {"note": "new"}
+
+
+@pytest.mark.asyncio
 async def test_replace_chat_messages_replaces_rows(hass: HomeAssistant) -> None:
     _setup_fresh_db(hass)
     from custom_components.intentsity.models import Chat, ChatMessage

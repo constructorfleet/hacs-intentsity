@@ -12,6 +12,7 @@ from custom_components.intentsity.const import (
     WS_CMD_SUBSCRIBE_CHATS,
 )
 from custom_components.intentsity.models import Chat, ChatListResponse, ChatMessage
+from custom_components.intentsity.utils import parse_timestamp
 
 
 class _Connection:
@@ -56,7 +57,7 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
     assert msg_id == 1
     assert payload["chats"][0]["conversation_id"] == "conv-1"
     assert payload["chats"][0]["pipeline_run_id"] == "run-1"
-    assert payload["chats"][0]["run_timestamp"] == now.isoformat()
+    assert parse_timestamp(payload["chats"][0]["run_timestamp"]) == now
 
 
 @pytest.mark.asyncio

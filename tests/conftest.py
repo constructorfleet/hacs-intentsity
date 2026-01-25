@@ -10,6 +10,7 @@ if str(ROOT_PATH) not in sys.path:
     sys.path.insert(0, str(ROOT_PATH))
 
 from homeassistant.core import HomeAssistant  # noqa: E402  pylint: disable=C0413
+from homeassistant.helpers import frame  # noqa: E402  pylint: disable=C0413
 
 from custom_components.intentsity import db  # noqa: E402  pylint: disable=C0413
 
@@ -25,6 +26,7 @@ class _HttpStub:
 @pytest_asyncio.fixture
 async def hass(tmp_path: Path) -> HomeAssistant:
     instance = HomeAssistant(str(tmp_path))
+    frame.async_setup(instance)
     instance.http = _HttpStub()
     try:
         yield instance

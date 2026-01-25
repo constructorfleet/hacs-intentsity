@@ -4,6 +4,8 @@ from typing import Any
 
 def parse_timestamp(value: Any) -> datetime:
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
         return value
     if isinstance(value, str):
         try:

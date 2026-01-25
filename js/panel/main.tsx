@@ -669,17 +669,24 @@ class IntentsityChatList extends LitElement {
     }
 
     private addDraft(chatId: string): void {
+        this.insertDraft(chatId, (this.drafts[chatId] ?? []).length);
+    }
+
+    private buildEmptyDraft(): DraftMessage {
+        return {
+            original_message_id: null,
+            timestamp: new Date().toISOString(),
+            sender: "assistant",
+            text: "",
+            dataText: "{}",
+        };
+    }
+
+    private insertDraft(chatId: string, index: number): void {
         const existing = this.drafts[chatId] ?? [];
-        const next = [
-            ...existing,
-            {
-                original_message_id: null,
-                timestamp: new Date().toISOString(),
-                sender: "assistant",
-                text: "",
-                dataText: "{}",
-            },
-        ];
+        const clamped = Math.max(0, Math.min(index, existing.length));
+        const next = [...existing];
+        next.splice(clamped, 0, this.buildEmptyDraft());
         this.drafts = { ...this.drafts, [chatId]: next };
     }
 
@@ -905,6 +912,10 @@ class IntentsityChatList extends LitElement {
                                                       ${(this.drafts[chatId] ?? []).map((draft, index) => html`
                                                           <div class="draft-message">
                                                               <div class="draft-controls">
+                                                                  <ha-button @click=${() => this.insertDraft(chatId, index)}>
+                                                                      <ha-icon icon="mdi:plus-box"></ha-icon>
+                                                                      Insert above
+                                                                  </ha-button>
                                                                   <ha-button @click=${() => this.moveDraft(chatId, index, -1)}>
                                                                       <ha-icon icon="mdi:arrow-up"></ha-icon>
                                                                       Up
@@ -912,6 +923,10 @@ class IntentsityChatList extends LitElement {
                                                                   <ha-button @click=${() => this.moveDraft(chatId, index, 1)}>
                                                                       <ha-icon icon="mdi:arrow-down"></ha-icon>
                                                                       Down
+                                                                  </ha-button>
+                                                                  <ha-button @click=${() => this.insertDraft(chatId, index + 1)}>
+                                                                      <ha-icon icon="mdi:plus-box-multiple"></ha-icon>
+                                                                      Insert below
                                                                   </ha-button>
                                                                   <ha-button @click=${() => this.removeDraft(chatId, index)}>
                                                                       <ha-icon icon="mdi:delete"></ha-icon>
