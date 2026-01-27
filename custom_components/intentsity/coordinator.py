@@ -63,7 +63,7 @@ def _process_intent_start(event: PipelineEvent, chat: Chat) -> Chat | None:
         ChatMessage(
             chat_id=chat.conversation_id,
             timestamp=parse_timestamp(event.timestamp),
-            sender="assistant",
+            sender="user",
             text=data.pop("intent_input", ""),
             data=asdict(data) if is_dataclass(data) else data,
         )
