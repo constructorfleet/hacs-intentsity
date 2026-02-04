@@ -8,6 +8,7 @@ const MAX_LIMIT = 500;
 const LIST_COMMAND = "intentsity/chats/list";
 const SUBSCRIBE_COMMAND = "intentsity/chats/subscribe";
 const SAVE_CORRECTED_COMMAND = "intentsity/chats/corrected/save";
+const EXPORT_CORRECTED_COMMAND = "intentsity/chats/corrected/export";
 const TOMBSTONE_COMMAND = "intentsity/chats/tombstone";
 
 type HassSubscription = () => void;
@@ -63,6 +64,11 @@ interface Chat {
 interface SubscriptionMessage {
     event?: { chats?: Chat[]; };
     chats?: Chat[];
+}
+
+interface CorrectedChatExportResponse {
+    jsonl: string;
+    count: number;
 }
 
 type TombstoneTarget =
@@ -329,6 +335,8 @@ class IntentsityChatList extends LitElement {
     ) => Promise<void>;
     @property({ attribute: false })
     onDeleteTargets?: (targets: TombstoneTarget[]) => Promise<void>;
+    @property({ attribute: false })
+    onExportCorrected?: () => Promise<CorrectedChatExportResponse>;
     @state() private drafts: Record<string, DraftMessage[]> = {};
     @state() private errors: Record<string, string | undefined> = {};
     @state() private saving: Record<string, boolean> = {};
@@ -340,6 +348,7 @@ class IntentsityChatList extends LitElement {
     @state() private selectedTargets: Record<string, TombstoneTarget> = {};
     @state() private toastMessage: string | null = null;
     @state() private toastKind: "success" | "error" = "success";
+    @state() private exporting = false;
     @state() private dialogOpen = false;
     @state() private dialogchatId: string | null = null;
     @state() private dialogIndex: number | null = null;
@@ -535,6 +544,9 @@ class IntentsityChatList extends LitElement {
                 gap: 12px;
                 margin-bottom: 16px;
                 flex-wrap: wrap;
+            }
+            .selection-spacer {
+                flex: 1;
             }
             .selection-count {
                 font-size: 12px;
@@ -935,6 +947,41 @@ class IntentsityChatList extends LitElement {
         };
     }
 
+    private buildExportFilename(): string {
+        const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+        return `corrected_chats_${timestamp}.training.jsonl`;
+    }
+
+    private downloadJsonl(jsonl: string): void {
+        const blob = new Blob([jsonl], { type: "application/jsonl" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = this.buildExportFilename();
+        anchor.click();
+        URL.revokeObjectURL(url);
+    }
+
+    private async handleExport(): Promise<void> {
+        if (!this.onExportCorrected) {
+            return;
+        }
+        this.exporting = true;
+        try {
+            const result = await this.onExportCorrected();
+            if (!result || !result.jsonl) {
+                this.showToast("No corrected chats to export.", "error");
+                return;
+            }
+            this.downloadJsonl(result.jsonl);
+            this.showToast(`Downloaded ${result.count} corrected chat${result.count === 1 ? "" : "s"}.`, "success");
+        } catch (error) {
+            this.showToast("Failed to export corrected chats.", "error");
+        } finally {
+            this.exporting = false;
+        }
+    }
+
     render() {
         if (!this.chats.length) {
             return html`
@@ -961,6 +1008,11 @@ class IntentsityChatList extends LitElement {
                     </ha-button>
                     <span class="selection-count">${selectedCount} selected</span>
                 ` : nothing}
+                <span class="selection-spacer"></span>
+                <ha-button @click=${() => void this.handleExport()} ?disabled=${this.exporting}>
+                    <ha-icon icon="mdi:download"></ha-icon>
+                    ${this.exporting ? "Exporting..." : "Download JSONL"}
+                </ha-button>
             </div>
             <div class="chat-grid">
                 ${groupChatsByConversation(this.chats).map((group) => html`
@@ -1376,6 +1428,18 @@ class IntentsityPanel extends LitElement {
         });
     }
 
+    private async exportCorrectedChats(): Promise<CorrectedChatExportResponse> {
+        const conn = await this.getConnection();
+        const start = this.toApiFilter(this.startFilter);
+        const end = this.toApiFilter(this.endFilter);
+        return conn.sendMessagePromise({
+            type: EXPORT_CORRECTED_COMMAND,
+            limit: this.limit,
+            start,
+            end,
+        });
+    }
+
     protected firstUpdated(): void {
         void this.loadChats();
     }
@@ -1472,6 +1536,7 @@ class IntentsityPanel extends LitElement {
                 .chats=${this.chats}
                 .onSaveCorrected=${this.saveCorrected.bind(this)}
                 .onDeleteTargets=${this.deleteTargets.bind(this)}
+                .onExportCorrected=${this.exportCorrectedChats.bind(this)}
             ></intentsity-chat-list>
         `;
     }

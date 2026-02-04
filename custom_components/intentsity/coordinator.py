@@ -4,6 +4,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import timedelta
 import functools
 import logging
+import re
 from typing import Any
 
 from homeassistant.components.assist_pipeline.pipeline import (
@@ -105,25 +106,28 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
-    elif "content" in data:
-        content = data.get("content", "")
-        if not content:
-            return chat
-        if not chat.messages or chat.messages[-1].sender != data.get(
-            "role", "assistant"
-        ):
-            chat.messages.append(
-                ChatMessage(
-                    chat_id=chat.conversation_id,
-                    timestamp=parse_timestamp(event.timestamp),
-                    sender=data.get("role", "assistant"),
-                    text="",
-                    data={},
-                )
-            )
-        chat_message = chat.messages[-1]
-        chat_message.text += content
-        chat_message.data.update(asdict(data) if is_dataclass(data) else data)  # type: ignore
+
+    return chat
+
+
+def _process_intent_end(event: PipelineEvent, chat: Chat) -> Chat | None:
+    if not event.data:
+        return None
+    data = event.data.copy()
+    response = data.get("response", {})
+    speech = response.get("speech", {}).get("plain", {}).get("speech", None)
+    if not speech:
+        return None
+
+    chat.messages.append(
+        ChatMessage(
+            chat_id=chat.conversation_id,
+            timestamp=parse_timestamp(event.timestamp),
+            sender=data.get("role", "assistant"),
+            text=speech,
+            data={},
+        )
+    )
     return chat
 
 
@@ -164,6 +168,7 @@ class IntentsityCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 elif event.type == PipelineEventType.INTENT_PROGRESS:
                     chat = _process_intent_progress(event, chat)
                 elif event.type == PipelineEventType.INTENT_END:
+                    chat = _process_intent_end(event, chat)
                     chat_ended = True
 
         if not chat or not chat_ended:

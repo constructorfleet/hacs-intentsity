@@ -7,6 +7,7 @@ import pytest
 from custom_components.intentsity import websocket
 from custom_components.intentsity.const import (
     DEFAULT_EVENT_LIMIT,
+    WS_CMD_EXPORT_CORRECTED_CHATS,
     WS_CMD_LIST_CHATS,
     WS_CMD_SAVE_CORRECTED_CHAT,
     WS_CMD_SUBSCRIBE_CHATS,
@@ -158,6 +159,40 @@ async def test_websocket_save_corrected_chat(hass, monkeypatch) -> None:
     assert saved["pipeline_run_id"] == "run-save"
     assert len(saved["messages"]) == 1
     assert conn.results == [(3, None)]
+
+
+@pytest.mark.asyncio
+async def test_websocket_export_corrected_chats(hass, monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _generate_corrected_jsonl(_hass, request):
+        captured["limit"] = request.limit
+        captured["start"] = request.start
+        captured["end"] = request.end
+        return {"jsonl": "{\"messages\": []}", "count": 0}
+
+    monkeypatch.setattr(websocket, "generate_corrected_jsonl", _generate_corrected_jsonl)
+
+    conn = _Connection()
+    start = "2026-01-01T12:00:00+00:00"
+    end = "2026-01-31T12:00:00+00:00"
+    websocket.websocket_export_corrected_chats(
+        hass,
+        conn,
+        {
+            "id": 5,
+            "type": WS_CMD_EXPORT_CORRECTED_CHATS,
+            "limit": DEFAULT_EVENT_LIMIT,
+            "start": start,
+            "end": end,
+        },
+    )
+    await hass.async_block_till_done()
+
+    assert conn.results == [(5, {"jsonl": "{\"messages\": []}", "count": 0})]
+    assert captured["limit"] == DEFAULT_EVENT_LIMIT
+    assert captured["start"] == parse_timestamp(start)
+    assert captured["end"] == parse_timestamp(end)
 
 
 @pytest.mark.asyncio

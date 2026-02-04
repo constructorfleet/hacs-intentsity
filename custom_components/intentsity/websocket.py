@@ -11,15 +11,18 @@ from .const import (
     MAX_EVENT_LIMIT,
     MIN_EVENT_LIMIT,
     SIGNAL_EVENT_RECORDED,
+    WS_CMD_EXPORT_CORRECTED_CHATS,
     WS_CMD_LIST_CHATS,
     WS_CMD_SAVE_CORRECTED_CHAT,
     WS_CMD_SUBSCRIBE_CHATS,
     WS_CMD_TOMBSTONE,
 )
 from .db import fetch_recent_chats, tombstone_targets, upsert_corrected_chat
+from .export import generate_corrected_jsonl
 from .models import (
     ChatListRequest,
     ChatListResponse,
+    CorrectedChatExportRequest,
     CorrectedChatSaveRequest,
     TombstoneRequest,
 )
@@ -38,6 +41,7 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_list_chats)
     websocket_api.async_register_command(hass, websocket_subscribe_chats)
     websocket_api.async_register_command(hass, websocket_save_corrected_chat)
+    websocket_api.async_register_command(hass, websocket_export_corrected_chats)
     websocket_api.async_register_command(hass, websocket_tombstone_targets)
 
 
@@ -170,6 +174,34 @@ def websocket_save_corrected_chat(
         connection.send_result(msg["id"])
 
     hass.async_create_task(_save())
+
+
+@websocket_api.decorators.websocket_command(
+    {
+        vol.Required("type"): WS_CMD_EXPORT_CORRECTED_CHATS,
+        vol.Optional("limit", default=DEFAULT_EVENT_LIMIT): _EVENT_LIMIT_SCHEMA,
+        vol.Optional("start"): _DATE_FILTER_SCHEMA,
+        vol.Optional("end"): _DATE_FILTER_SCHEMA,
+    }
+)
+@callback
+def websocket_export_corrected_chats(
+    hass: HomeAssistant,
+    connection: websocket_api.connection.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Export corrected chats as JSONL for fine-tuning."""
+    request = CorrectedChatExportRequest.model_validate(msg)
+
+    async def _export() -> None:
+        payload = await hass.async_add_executor_job(
+            generate_corrected_jsonl,
+            hass,
+            request,
+        )
+        connection.send_result(msg["id"], payload)
+
+    hass.async_create_task(_export())
 
 
 @websocket_api.decorators.websocket_command(

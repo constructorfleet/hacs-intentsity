@@ -19,6 +19,9 @@ dependencies = [
     "voluptuous>=0.13.1",
 ]
 
+[project.scripts]
+intentsity-export-corrected = "scripts.export_corrected_chats:main"
+
 [project.optional-dependencies]
 all = [
     "homeassistant==2026.1.3",
