@@ -105,6 +105,16 @@ def _process_intent_progress(event: PipelineEvent, chat: Chat) -> Chat | None:
                 data=asdict(data) if is_dataclass(data) else data,  # type: ignore
             )
         )
+    elif "content" in data:
+        chat.messages.append(
+            ChatMessage(
+                chat_id=chat.conversation_id,
+                timestamp=parse_timestamp(event.timestamp),
+                sender=data.get("role", "assistant"),
+                text=str(data.get("content", "")),
+                data=asdict(data) if is_dataclass(data) else data,  # type: ignore
+            )
+        )
 
     return chat
 
