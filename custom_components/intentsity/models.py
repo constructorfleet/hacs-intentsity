@@ -119,6 +119,24 @@ class TombstoneRequest(BaseModel):
     targets: list[TombstoneTarget]
 
 
+class CorrectedChatExportRequest(BaseModel):
+    limit: int
+    start: datetime | None = None
+    end: datetime | None = None
+
+    @field_validator("start", "end", mode="before")
+    @classmethod
+    def _empty_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
+
+class CorrectedChatExportResponse(BaseModel):
+    jsonl: str
+    count: int = 0
+
+
 ChatMessage.model_rebuild()
 CorrectedChatMessage.model_rebuild()
 CorrectedChat.model_rebuild()
@@ -128,3 +146,5 @@ ChatListRequest.model_rebuild()
 CorrectedChatSaveRequest.model_rebuild()
 TombstoneTarget.model_rebuild()
 TombstoneRequest.model_rebuild()
+CorrectedChatExportRequest.model_rebuild()
+CorrectedChatExportResponse.model_rebuild()

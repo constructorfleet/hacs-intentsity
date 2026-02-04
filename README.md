@@ -8,6 +8,7 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Uses the official `async_subscribe_chat_logs` API for non-invasive, observational logging.
 - Exposes a WebSocket API for listing recent chats and subscribing to live updates.
 - Ships a modern, responsive LitElement-based panel for reviewing and correcting conversation history.
+- Downloads corrected chats as JSONL formatted for fine-tuning.
 - Provides a sensor for the number of uncorrected conversations.
 
 ## Installation
@@ -25,11 +26,13 @@ A Home Assistant custom component that records Assist Pipeline chat logs and sur
 - Conversations are grouped by ID, showing both user and assistant messages with timestamps.
 - Filter conversations by corrected status or by a date/time range to focus reviews.
 - Use the corrected panel to reorder messages, insert new messages anywhere in the transcript, copy/paste messages across chats, edit tool calls/metadata, and save the corrected transcript.
+- Use "Download JSONL" to export corrected chats with the current filters applied (one JSONL line per conversation).
 - Use the "Refresh" button to reload the history or watch the live feed as you use Assist.
 - Developers can access the logs via WebSocket:
 	- `intentsity/chats/list` with a `limit` and optional `corrected`, `start`, `end` filters to fetch snapshots.
 	- `intentsity/chats/subscribe` with the same optional filters for live push updates.
 	- `intentsity/chats/corrected/save` with `conversation_id`, `pipeline_run_id`, and `messages` to persist corrections.
+	- `intentsity/chats/corrected/export` with `limit`, `start`, and `end` to download corrected chats as JSONL.
 	- `intentsity/chats/tombstone` with `targets` to soft-delete chats or messages. Each target includes:
 		- chat: `{ kind: "chat", conversation_id, pipeline_run_id }`
 		- message: `{ kind: "message", message_id }`
