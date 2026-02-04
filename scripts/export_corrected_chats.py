@@ -1,3 +1,5 @@
+
+# ruff: noqa
 # /// script
 # dependencies = [
 #   "homeassistant==2026.1.3",
