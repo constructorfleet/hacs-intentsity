@@ -17,7 +17,7 @@ from .const import (
     WS_CMD_SUBSCRIBE_CHATS,
     WS_CMD_TOMBSTONE,
 )
-from .db import fetch_recent_chats, tombstone_targets, upsert_corrected_chat
+from .db import fetch_chats, fetch_chats_page, tombstone_targets, upsert_corrected_chat
 from .export import generate_corrected_jsonl
 from .models import (
     ChatListRequest,
@@ -59,17 +59,18 @@ async def _async_fetch_chats_payload(
     request: ChatListRequest,
 ) -> dict:
     corrected = _normalize_corrected_filter(request.corrected)
-    chats = await hass.async_add_executor_job(
-        fetch_recent_chats,
+    chats, total = await hass.async_add_executor_job(
+        fetch_chats_page,
         hass,
         request.limit,
+        request.offset,
         corrected,
         request.start,
         request.end,
     )
     if isinstance(chats, ChatListResponse):
         return chats.model_dump(mode="json")
-    return ChatListResponse(chats=chats).model_dump(mode="json")
+    return ChatListResponse(chats=chats, total=total).model_dump(mode="json")
 
 
 
@@ -90,7 +91,19 @@ async def _async_send_chats_event(
     request_id: int,
     request: ChatListRequest,
 ) -> None:
-    payload = await _async_fetch_chats_payload(hass, request)
+    corrected = _normalize_corrected_filter(request.corrected)
+    chats = await hass.async_add_executor_job(
+        fetch_chats,
+        hass,
+        request.limit,
+        request.offset,
+        corrected,
+        request.start,
+        request.end,
+    )
+    payload = ChatListResponse(chats=chats).model_dump(
+        mode="json", exclude={"total"}
+    )
     connection.send_message(websocket_api.messages.event_message(request_id, payload))
 
 
@@ -98,6 +111,7 @@ async def _async_send_chats_event(
     {
         vol.Required("type"): WS_CMD_LIST_CHATS,
         vol.Optional("limit", default=DEFAULT_EVENT_LIMIT): _EVENT_LIMIT_SCHEMA,
+        vol.Optional("offset", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
         vol.Optional("corrected", default="all"): _CORRECTED_FILTER_SCHEMA,
         vol.Optional("start"): _DATE_FILTER_SCHEMA,
         vol.Optional("end"): _DATE_FILTER_SCHEMA,
@@ -117,6 +131,7 @@ def websocket_list_chats(hass: HomeAssistant, connection: websocket_api.connecti
     {
         vol.Required("type"): WS_CMD_SUBSCRIBE_CHATS,
         vol.Optional("limit", default=DEFAULT_EVENT_LIMIT): _EVENT_LIMIT_SCHEMA,
+        vol.Optional("offset", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
         vol.Optional("corrected", default="all"): _CORRECTED_FILTER_SCHEMA,
         vol.Optional("start"): _DATE_FILTER_SCHEMA,
         vol.Optional("end"): _DATE_FILTER_SCHEMA,

@@ -191,6 +191,115 @@ async def test_fetch_recent_chats_filters_by_corrected_and_date(
 
 
 @pytest.mark.asyncio
+async def test_fetch_chats_page_returns_filtered_total_and_requested_page(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for index in range(3):
+        timestamp = base_time.replace(day=index + 1)
+        db.upsert_chat(
+            hass,
+            Chat(
+                conversation_id=f"conv-page-{index}",
+                pipeline_run_id=f"run-page-{index}",
+                created_at=timestamp,
+                run_timestamp=timestamp,
+                messages=[ChatMessage(timestamp=timestamp, sender="user", text=str(index))],
+            ),
+        )
+
+    chats, total = db.fetch_chats_page(
+        hass,
+        limit=1,
+        offset=1,
+        start=base_time,
+        end=base_time.replace(day=3),
+    )
+
+    assert total == 3
+    assert [chat.conversation_id for chat in chats] == ["conv-page-1"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_chats_page_uses_primary_key_tiebreakers(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for conversation_id, pipeline_run_id in (
+        ("conv-a", "run-z"),
+        ("conv-z", "run-a"),
+        ("conv-z", "run-z"),
+    ):
+        db.upsert_chat(
+            hass,
+            Chat(
+                conversation_id=conversation_id,
+                pipeline_run_id=pipeline_run_id,
+                created_at=created_at,
+                run_timestamp=created_at,
+                messages=[
+                    ChatMessage(
+                        timestamp=created_at,
+                        sender="user",
+                        text=conversation_id,
+                    )
+                ],
+            ),
+        )
+
+    first_page, total = db.fetch_chats_page(hass, limit=2)
+    second_page, second_total = db.fetch_chats_page(hass, limit=2, offset=2)
+
+    assert total == second_total == 3
+    assert [
+        (chat.conversation_id, chat.pipeline_run_id) for chat in first_page
+    ] == [("conv-z", "run-z"), ("conv-z", "run-a")]
+    assert [
+        (chat.conversation_id, chat.pipeline_run_id) for chat in second_page
+    ] == [("conv-a", "run-z")]
+
+
+@pytest.mark.asyncio
+async def test_fetch_chats_returns_requested_rows_without_total(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for conversation_id in ("conv-a", "conv-b"):
+        db.upsert_chat(
+            hass,
+            Chat(
+                conversation_id=conversation_id,
+                pipeline_run_id="run-1",
+                created_at=created_at,
+                run_timestamp=created_at,
+                messages=[
+                    ChatMessage(
+                        timestamp=created_at,
+                        sender="user",
+                        text=conversation_id,
+                    )
+                ],
+            ),
+        )
+
+    chats = db.fetch_chats(hass, limit=1, offset=1)
+
+    assert [chat.conversation_id for chat in chats] == ["conv-a"]
+
+
+@pytest.mark.asyncio
 async def test_corrected_chat_persists_with_reordered_messages(
     hass: HomeAssistant,
 ) -> None:

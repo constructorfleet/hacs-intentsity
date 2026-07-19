@@ -52,6 +52,11 @@ async def test_async_initialize_registers_api(hass, monkeypatch) -> None:
     assert domain_data[DATA_API_REGISTERED] is True
     assert COORDINATOR_KEY in domain_data
     assert flags["panel"] == "intentsity"
+    static_paths = flags["static_paths"]
+    assert [path.url_path for path in static_paths] == [
+        "/intentsity_panel.js",
+        "/intentsity_logo.png",
+    ]
 
     flags.clear()
     await intentsity._async_initialize(hass)

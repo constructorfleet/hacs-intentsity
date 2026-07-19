@@ -13,7 +13,7 @@ from custom_components.intentsity.const import (
     WS_CMD_SUBSCRIBE_CHATS,
     WS_CMD_TOMBSTONE,
 )
-from custom_components.intentsity.models import Chat, ChatListResponse, ChatMessage
+from custom_components.intentsity.models import Chat, ChatMessage
 from custom_components.intentsity.utils import parse_timestamp
 
 
@@ -43,14 +43,15 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
 
     called: dict[str, object] = {}
 
-    def _fetch_recent_chats(_hass, limit, corrected, start, end):
+    def _fetch_chats_page(_hass, limit, offset, corrected, start, end):
         called["limit"] = limit
+        called["offset"] = offset
         called["corrected"] = corrected
         called["start"] = start
         called["end"] = end
-        return ChatListResponse(chats=[chat])
+        return [chat], 1
 
-    monkeypatch.setattr(websocket, "fetch_recent_chats", _fetch_recent_chats)
+    monkeypatch.setattr(websocket, "fetch_chats_page", _fetch_chats_page)
 
     conn = _Connection()
     start = "2026-01-01T12:00:00+00:00"
@@ -62,6 +63,7 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
             "id": 1,
             "type": WS_CMD_LIST_CHATS,
             "limit": DEFAULT_EVENT_LIMIT,
+            "offset": 20,
             "corrected": "uncorrected",
             "start": start,
             "end": end,
@@ -74,8 +76,10 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
     assert msg_id == 1
     assert payload["chats"][0]["conversation_id"] == "conv-1"
     assert payload["chats"][0]["pipeline_run_id"] == "run-1"
+    assert payload["total"] == 1
     assert parse_timestamp(payload["chats"][0]["run_timestamp"]) == now
     assert called["limit"] == DEFAULT_EVENT_LIMIT
+    assert called["offset"] == 20
     assert called["corrected"] is False
     assert called["start"] == parse_timestamp(start)
     assert called["end"] == parse_timestamp(end)
@@ -85,14 +89,15 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
 async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
     called: dict[str, object] = {}
 
-    def _fetch_recent_chats(_hass, limit, corrected, start, end):
+    def _fetch_chats(_hass, limit, offset, corrected, start, end):
         called["limit"] = limit
+        called["offset"] = offset
         called["corrected"] = corrected
         called["start"] = start
         called["end"] = end
         return []
 
-    monkeypatch.setattr(websocket, "fetch_recent_chats", _fetch_recent_chats)
+    monkeypatch.setattr(websocket, "fetch_chats", _fetch_chats)
 
     conn = _Connection()
     start = "2026-01-01T12:00:00+00:00"
@@ -104,6 +109,7 @@ async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
             "id": 2,
             "type": WS_CMD_SUBSCRIBE_CHATS,
             "limit": DEFAULT_EVENT_LIMIT,
+            "offset": 10,
             "corrected": "corrected",
             "start": start,
             "end": end,
@@ -115,7 +121,9 @@ async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
     assert 2 in conn.subscriptions
     assert conn.messages
     assert conn.messages[0]["type"] == "event"
+    assert "total" not in conn.messages[0]["event"]
     assert called["limit"] == DEFAULT_EVENT_LIMIT
+    assert called["offset"] == 10
     assert called["corrected"] is True
     assert called["start"] == parse_timestamp(start)
     assert called["end"] == parse_timestamp(end)

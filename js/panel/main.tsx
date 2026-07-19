@@ -62,8 +62,14 @@ interface Chat {
 }
 
 interface SubscriptionMessage {
-    event?: { chats?: Chat[]; };
+    event?: { chats?: Chat[]; total?: number; };
     chats?: Chat[];
+    total?: number;
+}
+
+interface ChatListResponse {
+    chats?: Chat[];
+    total?: number;
 }
 
 interface CorrectedChatExportResponse {
@@ -1310,8 +1316,11 @@ class IntentsityChatList extends LitElement {
 @customElement("intentsity-panel")
 class IntentsityPanel extends LitElement {
     @state() private chats: Chat[] = [];
+    @state() private total = 0;
     @state() private limit = DEFAULT_LIMIT;
+    @state() private offset = 0;
     @state() private correctedFilter: "all" | "corrected" | "uncorrected" = "all";
+    @state() private daysFilter = "";
     @state() private startFilter = "";
     @state() private endFilter = "";
 
@@ -1330,6 +1339,23 @@ class IntentsityPanel extends LitElement {
             h1 {
                 margin: 0 0 8px;
                 font-size: 24px;
+            }
+
+            .brand-header {
+                align-items: center;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                margin-bottom: 8px;
+            }
+
+            .brand-logo {
+                height: auto;
+                max-width: min(320px, 100%);
+            }
+
+            .brand-header h1 {
+                margin: 0;
             }
 
             .controls {
@@ -1354,6 +1380,7 @@ class IntentsityPanel extends LitElement {
 
     private readonly subscriptionHandler = (message: SubscriptionMessage): void => {
         this.chats = message.event?.chats ?? message.chats ?? [];
+        this.total = message.event?.total ?? message.total ?? this.total;
     };
 
     private async getConnection(): Promise<HassConnection> {
@@ -1383,23 +1410,26 @@ class IntentsityPanel extends LitElement {
         const conn = await this.getConnection();
         this.teardownSubscription();
 
-        const start = this.toApiFilter(this.startFilter);
+        const start = this.getStartFilter();
         const end = this.toApiFilter(this.endFilter);
-        
+
         // Initial snapshot
-        const response = await conn.sendMessagePromise<{ chats?: Chat[]; }>(({
+        const response = await conn.sendMessagePromise<ChatListResponse>({
             type: LIST_COMMAND,
             limit: this.limit,
+            offset: this.offset,
             corrected: this.correctedFilter,
             start,
             end,
-        } as any));
+        });
         this.chats = response.chats ?? [];
+        this.total = response.total ?? 0;
 
         // Live subscription
-        this.unsubscribe = await conn.subscribeMessage(this.subscriptionHandler, (({ 
+        this.unsubscribe = await conn.subscribeMessage(this.subscriptionHandler, (({
             type: SUBSCRIBE_COMMAND,
             limit: this.limit,
+            offset: this.offset,
             corrected: this.correctedFilter,
             start,
             end,
@@ -1430,7 +1460,7 @@ class IntentsityPanel extends LitElement {
 
     private async exportCorrectedChats(): Promise<CorrectedChatExportResponse> {
         const conn = await this.getConnection();
-        const start = this.toApiFilter(this.startFilter);
+        const start = this.getStartFilter();
         const end = this.toApiFilter(this.endFilter);
         return conn.sendMessagePromise({
             type: EXPORT_CORRECTED_COMMAND,
@@ -1452,26 +1482,44 @@ class IntentsityPanel extends LitElement {
     private handleLimitChange(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         this.limit = clampLimit(input.value);
+        this.offset = 0;
         void this.loadChats();
     }
 
     private handleCorrectedFilter(event: Event) {
         const detail = (event as CustomEvent).detail as { value?: string } | undefined;
-        const input = event.currentTarget as HTMLInputElement | null;
-        const value = (detail?.value ?? input?.value ?? "all") as "all" | "corrected" | "uncorrected";
+        const select = event.currentTarget as { value?: string; selected?: string } | null;
+        const value = (detail?.value ?? select?.value ?? select?.selected ?? "all") as "all" | "corrected" | "uncorrected";
         this.correctedFilter = value;
+        this.offset = 0;
+        void this.loadChats();
+    }
+
+    private handleDaysFilter(event: Event) {
+        const input = event.currentTarget as HTMLInputElement;
+        const value = Number(input.value);
+        this.daysFilter = Number.isInteger(value) && value > 0
+            ? String(Math.min(value, 3650))
+            : "";
+        this.startFilter = "";
+        this.endFilter = "";
+        this.offset = 0;
         void this.loadChats();
     }
 
     private handleStartFilter(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         this.startFilter = input.value;
+        this.daysFilter = "";
+        this.offset = 0;
         void this.loadChats();
     }
 
     private handleEndFilter(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         this.endFilter = input.value;
+        this.daysFilter = "";
+        this.offset = 0;
         void this.loadChats();
     }
 
@@ -1486,11 +1534,41 @@ class IntentsityPanel extends LitElement {
         return timestamp.toISOString();
     }
 
+    private getStartFilter(): string | undefined {
+        if (this.daysFilter) {
+            const days = Number(this.daysFilter);
+            if (Number.isInteger(days) && days > 0) {
+                return new Date(Date.now() - days * 86_400_000).toISOString();
+            }
+        }
+        return this.toApiFilter(this.startFilter);
+    }
+
+    private get page(): number {
+        return Math.floor(this.offset / this.limit) + 1;
+    }
+
+    private get pageCount(): number {
+        return Math.max(1, Math.ceil(this.total / this.limit));
+    }
+
+    private changePage(direction: number): void {
+        const nextOffset = this.offset + direction * this.limit;
+        if (nextOffset < 0 || nextOffset >= this.total) {
+            return;
+        }
+        this.offset = nextOffset;
+        void this.loadChats();
+    }
+
     render() {
         return html`
             <ha-card>
                 <div class="card-content">
-                    <h1>Assist Chat Log</h1>
+                    <div class="brand-header">
+                        <img class="brand-logo" src="/intentsity_logo.png" alt="Intentsity" />
+                        <h1>Intent Review</h1>
+                    </div>
                     <p>Observational log of all Home Assistant Assist conversations.</p>
 
                     <div class="controls">
@@ -1500,6 +1578,14 @@ class IntentsityPanel extends LitElement {
                                 type="number"
                                 .value=${String(this.limit)}
                                 @change=${this.handleLimitChange}
+                            ></ha-textfield>
+                            <ha-textfield
+                                label="Last N days"
+                                type="number"
+                                min="1"
+                                max="3650"
+                                .value=${this.daysFilter}
+                                @change=${this.handleDaysFilter}
                             ></ha-textfield>
                             <ha-textfield
                                 label="Start"
@@ -1528,6 +1614,17 @@ class IntentsityPanel extends LitElement {
                             <ha-icon icon="mdi:refresh"></ha-icon>
                             Refresh
                         </ha-button>
+                    </div>
+                    <div class="controls">
+                        <span>${this.total} conversations, page ${this.page} of ${this.pageCount}</span>
+                        <ha-button
+                            ?disabled=${this.offset === 0}
+                            @click=${() => this.changePage(-1)}
+                        >Previous</ha-button>
+                        <ha-button
+                            ?disabled=${this.offset + this.limit >= this.total}
+                            @click=${() => this.changePage(1)}
+                        >Next</ha-button>
                     </div>
                 </div>
             </ha-card>
