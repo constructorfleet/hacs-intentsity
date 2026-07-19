@@ -191,6 +191,40 @@ async def test_fetch_recent_chats_filters_by_corrected_and_date(
 
 
 @pytest.mark.asyncio
+async def test_fetch_chats_page_returns_filtered_total_and_requested_page(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    base_time = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for index in range(3):
+        timestamp = base_time.replace(day=index + 1)
+        db.upsert_chat(
+            hass,
+            Chat(
+                conversation_id=f"conv-page-{index}",
+                pipeline_run_id=f"run-page-{index}",
+                created_at=timestamp,
+                run_timestamp=timestamp,
+                messages=[ChatMessage(timestamp=timestamp, sender="user", text=str(index))],
+            ),
+        )
+
+    chats, total = db.fetch_chats_page(
+        hass,
+        limit=1,
+        offset=1,
+        start=base_time,
+        end=base_time.replace(day=3),
+    )
+
+    assert total == 3
+    assert [chat.conversation_id for chat in chats] == ["conv-page-1"]
+
+
+@pytest.mark.asyncio
 async def test_corrected_chat_persists_with_reordered_messages(
     hass: HomeAssistant,
 ) -> None:

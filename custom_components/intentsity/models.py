@@ -57,10 +57,12 @@ class Chat(BaseModel):
 
 class ChatListResponse(BaseModel):
     chats: list[Chat]
+    total: int = 0
 
 
 class ChatListRequest(BaseModel):
     limit: int
+    offset: int = 0
     corrected: str = "all"
     start: datetime | None = None
     end: datetime | None = None
@@ -71,6 +73,13 @@ class ChatListRequest(BaseModel):
         allowed = {"all", "corrected", "uncorrected"}
         if value not in allowed:
             raise ValueError("corrected must be one of: all, corrected, uncorrected")
+        return value
+
+    @field_validator("offset")
+    @classmethod
+    def _validate_offset(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("offset must be greater than or equal to zero")
         return value
 
     @field_validator("start", "end", mode="before")
