@@ -12,6 +12,9 @@
   },
   "license": "MIT",
   "author": "@Teagan42",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "rollup -c"

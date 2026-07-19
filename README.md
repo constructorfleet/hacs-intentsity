@@ -2,6 +2,8 @@
   <img src="brand/logo.png" alt="Intentsity" width="640">
 </p>
 
+# Intentsity
+
 A Home Assistant custom component that records Assist Pipeline chat logs and surfaces them in a clean UI.
 
 ## Features
