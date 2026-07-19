@@ -10,7 +10,7 @@
     "type": "git",
     "url": "git+https://github.com/constructorfleet/hacs-intentsity.git"
   },
-  "license": "ISC",
+  "license": "MIT",
   "author": "@Teagan42",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
