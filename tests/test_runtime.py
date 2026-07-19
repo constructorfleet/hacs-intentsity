@@ -225,6 +225,49 @@ async def test_fetch_chats_page_returns_filtered_total_and_requested_page(
 
 
 @pytest.mark.asyncio
+async def test_fetch_chats_page_uses_primary_key_tiebreakers(
+    hass: HomeAssistant,
+) -> None:
+    _setup_fresh_db(hass)
+
+    from custom_components.intentsity.models import Chat, ChatMessage
+
+    created_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for conversation_id, pipeline_run_id in (
+        ("conv-a", "run-z"),
+        ("conv-z", "run-a"),
+        ("conv-z", "run-z"),
+    ):
+        db.upsert_chat(
+            hass,
+            Chat(
+                conversation_id=conversation_id,
+                pipeline_run_id=pipeline_run_id,
+                created_at=created_at,
+                run_timestamp=created_at,
+                messages=[
+                    ChatMessage(
+                        timestamp=created_at,
+                        sender="user",
+                        text=conversation_id,
+                    )
+                ],
+            ),
+        )
+
+    first_page, total = db.fetch_chats_page(hass, limit=2)
+    second_page, second_total = db.fetch_chats_page(hass, limit=2, offset=2)
+
+    assert total == second_total == 3
+    assert [
+        (chat.conversation_id, chat.pipeline_run_id) for chat in first_page
+    ] == [("conv-z", "run-z"), ("conv-z", "run-a")]
+    assert [
+        (chat.conversation_id, chat.pipeline_run_id) for chat in second_page
+    ] == [("conv-a", "run-z")]
+
+
+@pytest.mark.asyncio
 async def test_corrected_chat_persists_with_reordered_messages(
     hass: HomeAssistant,
 ) -> None:

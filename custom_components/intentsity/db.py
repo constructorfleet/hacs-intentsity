@@ -794,7 +794,11 @@ class IntentsityDBClient:
             total = session.scalar(count_stmt.where(*filters)) or 0
             rows = session.scalars(
                 chats_stmt.where(*filters)
-                .order_by(ChatRow.created_at.desc())
+                .order_by(
+                    ChatRow.created_at.desc(),
+                    ChatRow.conversation_id.desc(),
+                    ChatRow.pipeline_run_id.desc(),
+                )
                 .offset(offset)
                 .limit(limit)
                 .options(
