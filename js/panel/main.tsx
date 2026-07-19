@@ -1341,6 +1341,23 @@ class IntentsityPanel extends LitElement {
                 font-size: 24px;
             }
 
+            .brand-header {
+                align-items: center;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 16px;
+                margin-bottom: 8px;
+            }
+
+            .brand-logo {
+                height: auto;
+                max-width: min(320px, 100%);
+            }
+
+            .brand-header h1 {
+                margin: 0;
+            }
+
             .controls {
                 display: flex;
                 align-items: center;
@@ -1548,7 +1565,10 @@ class IntentsityPanel extends LitElement {
         return html`
             <ha-card>
                 <div class="card-content">
-                    <h1>Assist Chat Log</h1>
+                    <div class="brand-header">
+                        <img class="brand-logo" src="/intentsity_logo.png" alt="Intentsity" />
+                        <h1>Intent Review</h1>
+                    </div>
                     <p>Observational log of all Home Assistant Assist conversations.</p>
 
                     <div class="controls">

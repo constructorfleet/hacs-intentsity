@@ -92,6 +92,11 @@ async def _async_initialize(hass: HomeAssistant) -> None:
                     hass.config.path("custom_components/intentsity/panel.js"),
                     False,
                 ),
+                StaticPathConfig(
+                    "/intentsity_logo.png",
+                    hass.config.path("custom_components/intentsity/brand/logo.png"),
+                    False,
+                ),
             ]
         )
         async_register_built_in_panel(
