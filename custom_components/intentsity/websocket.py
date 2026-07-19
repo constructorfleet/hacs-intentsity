@@ -17,7 +17,7 @@ from .const import (
     WS_CMD_SUBSCRIBE_CHATS,
     WS_CMD_TOMBSTONE,
 )
-from .db import fetch_chats_page, tombstone_targets, upsert_corrected_chat
+from .db import fetch_chats, fetch_chats_page, tombstone_targets, upsert_corrected_chat
 from .export import generate_corrected_jsonl
 from .models import (
     ChatListRequest,
@@ -91,7 +91,19 @@ async def _async_send_chats_event(
     request_id: int,
     request: ChatListRequest,
 ) -> None:
-    payload = await _async_fetch_chats_payload(hass, request)
+    corrected = _normalize_corrected_filter(request.corrected)
+    chats = await hass.async_add_executor_job(
+        fetch_chats,
+        hass,
+        request.limit,
+        request.offset,
+        corrected,
+        request.start,
+        request.end,
+    )
+    payload = ChatListResponse(chats=chats).model_dump(
+        mode="json", exclude={"total"}
+    )
     connection.send_message(websocket_api.messages.event_message(request_id, payload))
 
 

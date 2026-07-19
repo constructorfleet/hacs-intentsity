@@ -755,6 +755,33 @@ class IntentsityDBClient:
         start: datetime | None = None,
         end: datetime | None = None,
     ) -> tuple[list[Chat], int]:
+        return self._fetch_chats(
+            limit, offset, corrected, start, end, include_total=True
+        )
+
+    def fetch_chats(
+        self,
+        limit: int,
+        offset: int = 0,
+        corrected: bool | None = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
+    ) -> list[Chat]:
+        chats, _ = self._fetch_chats(
+            limit, offset, corrected, start, end, include_total=False
+        )
+        return chats
+
+    def _fetch_chats(
+        self,
+        limit: int,
+        offset: int,
+        corrected: bool | None,
+        start: datetime | None,
+        end: datetime | None,
+        *,
+        include_total: bool,
+    ) -> tuple[list[Chat], int]:
         engine = self._get_engine()
         with Session(engine) as session:
             run_timestamp = func.coalesce(ChatRow.run_timestamp, ChatRow.created_at)
@@ -782,16 +809,22 @@ class IntentsityDBClient:
             if end is not None:
                 filters.append(run_timestamp <= end)
 
-            count_stmt = select(func.count()).select_from(ChatRow)
             chats_stmt = select(ChatRow)
             if join is not None:
                 if corrected is False:
-                    count_stmt = count_stmt.outerjoin(*join)
                     chats_stmt = chats_stmt.outerjoin(*join)
                 else:
-                    count_stmt = count_stmt.join(*join)
                     chats_stmt = chats_stmt.join(*join)
-            total = session.scalar(count_stmt.where(*filters)) or 0
+            total = 0
+            if include_total:
+                count_stmt = select(func.count()).select_from(ChatRow)
+                if join is not None:
+                    count_stmt = (
+                        count_stmt.outerjoin(*join)
+                        if corrected is False
+                        else count_stmt.join(*join)
+                    )
+                total = session.scalar(count_stmt.where(*filters)) or 0
             rows = session.scalars(
                 chats_stmt.where(*filters)
                 .order_by(
@@ -1037,6 +1070,17 @@ def fetch_chats_page(
     end: datetime | None = None,
 ) -> tuple[list[Chat], int]:
     return _get_client(hass).fetch_chats_page(limit, offset, corrected, start, end)
+
+
+def fetch_chats(
+    hass: HomeAssistant,
+    limit: int,
+    offset: int = 0,
+    corrected: bool | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> list[Chat]:
+    return _get_client(hass).fetch_chats(limit, offset, corrected, start, end)
 
 
 def fetch_latest_chat_by_conversation_id(

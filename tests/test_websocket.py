@@ -89,15 +89,15 @@ async def test_websocket_list_chats(hass, monkeypatch) -> None:
 async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
     called: dict[str, object] = {}
 
-    def _fetch_chats_page(_hass, limit, offset, corrected, start, end):
+    def _fetch_chats(_hass, limit, offset, corrected, start, end):
         called["limit"] = limit
         called["offset"] = offset
         called["corrected"] = corrected
         called["start"] = start
         called["end"] = end
-        return [], 0
+        return []
 
-    monkeypatch.setattr(websocket, "fetch_chats_page", _fetch_chats_page)
+    monkeypatch.setattr(websocket, "fetch_chats", _fetch_chats)
 
     conn = _Connection()
     start = "2026-01-01T12:00:00+00:00"
@@ -121,6 +121,7 @@ async def test_websocket_subscribe_chats(hass, monkeypatch) -> None:
     assert 2 in conn.subscriptions
     assert conn.messages
     assert conn.messages[0]["type"] == "event"
+    assert "total" not in conn.messages[0]["event"]
     assert called["limit"] == DEFAULT_EVENT_LIMIT
     assert called["offset"] == 10
     assert called["corrected"] is True
