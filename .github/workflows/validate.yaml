@@ -41,11 +41,12 @@ jobs:
         run: |
           uv run pytest \
             --junitxml=pytest.xml \
-            --cov=hacs-intentsity \
+            --cov=custom_components.intentsity \
             --cov-report=term-missing:skip-covered \
             --cov-report=xml:coverage.xml \
             | tee pytest-coverage.txt
       - name: Coverage comment
+        if: github.event_name == 'pull_request'
         uses: MishaKav/pytest-coverage-comment@main
         with:
           pytest-coverage-path: pytest-coverage.txt
