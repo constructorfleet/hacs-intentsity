@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 
 [[package]]
@@ -917,7 +917,7 @@ wheels = [
 
 [[package]]
 name = "hacs-intentsity"
-version = "0.7.2"
+version = "0.7.3"
 source = { virtual = "." }
 dependencies = [
     { name = "ha-ffmpeg" },
